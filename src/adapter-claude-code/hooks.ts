@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod/v4";
 import { finalizeSessionEvents } from "../application/finalization.js";
+import { runMaintenance } from "../application/maintenance.js";
 import type { EventEnvelope } from "../domain/event.js";
 import { discoverGitContext } from "../platform/git.js";
 import { loadProject, type ProjectBinding } from "../platform/project.js";
@@ -134,6 +135,7 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
       finalizeSessionEvents(store, project.id, sessionRefHash, {
         branchName: inputGit.branch,
         commitSha: inputGit.head,
+        projectRoot: project.root,
       });
     }
     const accepted = store.ingestRawEvent(envelope);
@@ -142,7 +144,17 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
       finalized = finalizeSessionEvents(store, project.id, envelope.sessionRefHash, {
         branchName: inputGit.branch,
         commitSha: inputGit.head,
+        projectRoot: project.root,
       }).recorded;
+      try {
+        runMaintenance(store, project.id, project.root, {
+          dryRun: false,
+          limit: 50,
+          ...(inputGit.head ? { head: inputGit.head } : {}),
+        });
+      } catch {
+        // Lifecycle maintenance must not make a SessionEnd hook blocking or fatal.
+      }
     }
     return { accepted, spooled: false, finalized };
   } catch (error) {
@@ -169,7 +181,17 @@ export function replayProjectSpool(project: ProjectBinding): { replayed: number;
       finalized += finalizeSessionEvents(store, project.id, sessionRefHash, {
         branchName: git.branch,
         commitSha: git.head,
+        projectRoot: project.root,
       }).recorded;
+    }
+    try {
+      runMaintenance(store, project.id, project.root, {
+        dryRun: false,
+        limit: 200,
+        ...(git.head ? { head: git.head } : {}),
+      });
+    } catch {
+      // Spool replay remains useful even if lifecycle assessment cannot run.
     }
     return { replayed: result.replayed, failed: result.failed, finalized };
   } finally {

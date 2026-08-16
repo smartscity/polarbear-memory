@@ -1,5 +1,6 @@
 import type { MemoryType, RecordMemoryInput } from "../domain/memory.js";
 import type { MemoryStore } from "./ports.js";
+import { captureFileAnchors } from "../platform/anchors.js";
 
 const LABELS: Array<{ type: MemoryType; pattern: RegExp }> = [
   { type: "DECISION", pattern: /^(?:decision|决策|决定)\s*[:：-]\s*(.+)$/iu },
@@ -26,8 +27,13 @@ export function extractCandidates(message: string): RecordMemoryInput[] {
     const line = cleanLine(rawLine);
     for (const { type, pattern } of LABELS) {
       const match = pattern.exec(line);
-      const summary = match?.[1]?.trim();
+      let summary = match?.[1]?.trim();
       if (!summary || summary.length > 2_048) continue;
+      const completionMatch = (type === "TASK_STATE" || type === "TODO")
+        ? /^\[(completed|cancelled|已完成|已取消)\]\s*(.+)$/iu.exec(summary)
+        : null;
+      const completionState = completionMatch?.[1]?.toLowerCase();
+      if (completionMatch?.[2]) summary = completionMatch[2].trim();
       candidates.push({
         type,
         summary,
@@ -36,6 +42,9 @@ export function extractCandidates(message: string): RecordMemoryInput[] {
         sourceType: "HOOK",
         confidence: 800,
         importance: type === "TASK_STATE" || type === "TODO" ? 600 : 700,
+        ...(completionState
+          ? { completionState: completionState === "completed" || completionState === "已完成" ? "COMPLETED" : "CANCELLED" }
+          : {}),
       });
       break;
     }
@@ -47,7 +56,7 @@ export function finalizeSessionEvents(
   store: MemoryStore,
   projectId: string,
   sessionRefHash: string,
-  gitContext: { branchName?: string | undefined; commitSha?: string | undefined } = {},
+  gitContext: { branchName?: string | undefined; commitSha?: string | undefined; projectRoot?: string | undefined } = {},
 ): {
   events: number;
   candidates: number;
@@ -65,6 +74,9 @@ export function finalizeSessionEvents(
           ...candidate,
           ...(gitContext.branchName ? { branchName: gitContext.branchName } : {}),
           ...(gitContext.commitSha ? { commitSha: gitContext.commitSha } : {}),
+          ...(gitContext.projectRoot && candidate.files && candidate.files.length > 0
+            ? { fileAnchors: captureFileAnchors(gitContext.projectRoot, candidate.files, gitContext.commitSha) }
+            : {}),
         });
         recorded += 1;
       }

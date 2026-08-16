@@ -3,14 +3,16 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { compileContext } from "./application/context.js";
+import { runMaintenance } from "./application/maintenance.js";
 import { runBenchmark } from "./application/benchmark.js";
 import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration } from "./adapter-claude-code/integration.js";
 import { parseMemoryType } from "./domain/memory.js";
 import { discoverGitContext, normalizeRepoFile } from "./platform/git.js";
+import { captureFileAnchors } from "./platform/anchors.js";
 import { loadProject, planProject, writeProjectConfig } from "./platform/project.js";
 import { SqliteMemoryStore } from "./storage/sqlite-store.js";
 
-const VERSION = "0.0.3";
+const VERSION = "0.0.4";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -23,6 +25,11 @@ Usage:
   polarbear-memory context --task TEXT [--budget N]
   polarbear-memory verify MEMORY_ID --result STATE --reason TEXT
   polarbear-memory forget MEMORY_ID --reason TEXT
+  polarbear-memory restore MEMORY_ID --reason TEXT
+  polarbear-memory complete MEMORY_ID --result completed|cancelled --reason TEXT
+  polarbear-memory feedback MEMORY_ID --result useful|not-useful --reason TEXT
+  polarbear-memory relate SOURCE_ID --type supersedes|contradicts --target TARGET_ID --reason TEXT
+  polarbear-memory maintain [--dry-run] [--limit N]
   polarbear-memory status
   polarbear-memory doctor
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
@@ -105,6 +112,7 @@ function record(cwd: string, args: string[]): void {
       summary: parsed.values.summary,
       ...(parsed.values.content ? { content: parsed.values.content } : {}),
       ...(files.length > 0 ? { files } : {}),
+      ...(files.length > 0 ? { fileAnchors: captureFileAnchors(project.root, files, git.head) } : {}),
       ...(git.head ? { commitSha: git.head } : {}),
       ...(git.branch ? { branchName: git.branch } : {}),
       confidence: parseNumber(parsed.values.confidence, 700, "confidence"),
@@ -124,7 +132,9 @@ function search(cwd: string, args: string[]): void {
   withStore(cwd, (store, project) => {
     const results = store.search(project.id, query, parseNumber(parsed.values.limit, 10, "limit"));
     if (results.length === 0) return console.log("No matching memory found.");
-    for (const { memory } of results) console.log(`${memory.id}\t${memory.type}\t${memory.summary}`);
+    for (const { memory } of results) {
+      console.log(`${memory.id}\t${memory.type}\t${memory.correctnessRisk}\t${memory.summary}`);
+    }
   });
 }
 
@@ -145,6 +155,16 @@ function context(cwd: string, args: string[]): void {
   });
   if (!parsed.values.task) throw new Error("context requires --task.");
   withStore(cwd, (store, project) => {
+    const git = discoverGitContext(project.root);
+    try {
+      runMaintenance(store, project.id, project.root, {
+        dryRun: false,
+        limit: 100,
+        ...(git.head ? { head: git.head } : {}),
+      });
+    } catch {
+      // Bounded maintenance is best-effort and must not block context retrieval.
+    }
     const result = compileContext(store, project.id, parsed.values.task as string, parseNumber(parsed.values.budget, 1000, "budget"));
     process.stdout.write(result.markdown);
     console.error(`Context: ${result.selected} memories, ~${result.estimatedTokens} tokens`);
@@ -159,6 +179,8 @@ function status(cwd: string): void {
     console.log(`Total     ${counts.total ?? 0}`);
     console.log(`Active    ${counts.active ?? 0}`);
     console.log(`Archived  ${counts.archived ?? 0}`);
+    console.log(`Stale     ${counts.high_risk ?? 0}`);
+    console.log(`Completed ${counts.completed ?? 0}`);
   });
 }
 
@@ -177,8 +199,104 @@ function verify(cwd: string, args: string[]): void {
     throw new Error("verify --result must be VERIFIED, DISPUTED or UNVERIFIED.");
   }
   withStore(cwd, (store, project) => {
-    const memory = store.verify(project.id, memoryId, parsed.values.result as "VERIFIED" | "DISPUTED" | "UNVERIFIED", parsed.values.reason as string, "HUMAN_CLI");
+    const git = discoverGitContext(project.root);
+    const current = store.get(project.id, memoryId);
+    if (!current) throw new Error(`Memory not found: ${memoryId}`);
+    const memory = store.verify(
+      project.id,
+      memoryId,
+      parsed.values.result as "VERIFIED" | "DISPUTED" | "UNVERIFIED",
+      parsed.values.reason as string,
+      "HUMAN_CLI",
+      { anchors: captureFileAnchors(project.root, current.files, git.head), ...(git.head ? { checkedCommit: git.head } : {}) },
+    );
     console.log(`Memory ${memory.id} is ${memory.verificationState}.`);
+  });
+}
+
+function restore(cwd: string, args: string[]): void {
+  const parsed = parseArgs({ args, options: { reason: { type: "string" } }, allowPositionals: true, strict: true });
+  const memoryId = parsed.positionals[0];
+  if (parsed.positionals.length !== 1 || !memoryId || !parsed.values.reason) {
+    throw new Error("restore requires MEMORY_ID and --reason.");
+  }
+  withStore(cwd, (store, project) => {
+    const memory = store.restore(project.id, memoryId, parsed.values.reason as string);
+    console.log(`Memory ${memory.id} restored with a 30-day automatic-archive grace period.`);
+  });
+}
+
+function complete(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: { result: { type: "string" }, reason: { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const memoryId = parsed.positionals[0];
+  const result = parsed.values.result?.toUpperCase();
+  if (parsed.positionals.length !== 1 || !memoryId || !result || !parsed.values.reason
+    || (result !== "COMPLETED" && result !== "CANCELLED")) {
+    throw new Error("complete requires MEMORY_ID, --result completed|cancelled and --reason.");
+  }
+  withStore(cwd, (store, project) => {
+    const memory = store.complete(project.id, memoryId, result, parsed.values.reason as string);
+    console.log(`Memory ${memory.id} is ${memory.completionState} and has left normal Context.`);
+  });
+}
+
+function relate(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: { type: { type: "string" }, target: { type: "string" }, reason: { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const source = parsed.positionals[0];
+  const type = parsed.values.type?.toUpperCase();
+  if (parsed.positionals.length !== 1 || !source || !parsed.values.target || !parsed.values.reason
+    || (type !== "SUPERSEDES" && type !== "CONTRADICTS")) {
+    throw new Error("relate requires SOURCE_ID, --type supersedes|contradicts, --target TARGET_ID and --reason.");
+  }
+  withStore(cwd, (store, project) => {
+    store.addRelation(project.id, source, parsed.values.target as string, type, parsed.values.reason as string);
+    console.log(`Recorded ${type} relation from ${source} to ${parsed.values.target}.`);
+  });
+}
+
+function feedback(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: { result: { type: "string" }, reason: { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const memoryId = parsed.positionals[0];
+  const result = parsed.values.result?.toLowerCase();
+  if (parsed.positionals.length !== 1 || !memoryId || !parsed.values.reason
+    || (result !== "useful" && result !== "not-useful")) {
+    throw new Error("feedback requires MEMORY_ID, --result useful|not-useful and --reason.");
+  }
+  withStore(cwd, (store, project) => {
+    const memory = store.noteFeedback(project.id, memoryId, result === "useful", parsed.values.reason as string);
+    console.log(`Recorded ${result} feedback for ${memory.id}.`);
+  });
+}
+
+function maintain(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: { "dry-run": { type: "boolean", default: false }, limit: { type: "string" } },
+    strict: true,
+  });
+  const git = discoverGitContext(cwd);
+  withStore(cwd, (store, project) => {
+    const plan = runMaintenance(store, project.id, project.root, {
+      dryRun: parsed.values["dry-run"],
+      limit: parseNumber(parsed.values.limit, 200, "limit"),
+      ...(git.head ? { head: git.head } : {}),
+    });
+    console.log(JSON.stringify(plan, null, 2));
   });
 }
 
@@ -218,7 +336,7 @@ function benchmark(cwd: string, args: string[]): void {
   const store = new SqliteMemoryStore(":memory:");
   try {
     store.initializeProject(project);
-    const result = runBenchmark(store, project.id, args[0]);
+    const result = runBenchmark(store, project.id, args[0], project.root);
     console.log(JSON.stringify(result, null, 2));
     if (!result.passed) process.exitCode = 1;
   } finally {
@@ -343,6 +461,11 @@ async function main(): Promise<void> {
     case "context": return context(cwd, args);
     case "verify": return verify(cwd, args);
     case "forget": return forget(cwd, args);
+    case "restore": return restore(cwd, args);
+    case "complete": return complete(cwd, args);
+    case "feedback": return feedback(cwd, args);
+    case "relate": return relate(cwd, args);
+    case "maintain": return maintain(cwd, args);
     case "status": return status(cwd);
     case "doctor": return doctor(cwd);
     case "rebuild-index": return withStore(cwd, (store) => { store.rebuildSearchIndex(); console.log("Search index rebuilt."); });

@@ -1,6 +1,6 @@
 {
   "name": "polarbear-memory",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "description": "Local-first persistent memory for coding agents",
   "type": "module",

@@ -20,7 +20,7 @@ function run(command: string, args: string[], cwd: string, dataDir?: string, inp
   return result;
 }
 
-test("CLI completes MVP-0 flow and real MCP stdio handshake", async () => {
+test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-cli-"));
   const repository = join(temporary, "repo");
   const dataDir = join(temporary, "data");
@@ -34,6 +34,8 @@ test("CLI completes MVP-0 flow and real MCP stdio handshake", async () => {
     assert.match(dryRun.stdout, /no files were changed/);
 
     run(process.execPath, offline(["init"]), repository, dataDir);
+    const maintenancePreview = run(process.execPath, offline(["maintain", "--dry-run"]), repository, dataDir);
+    assert.match(maintenancePreview.stdout, /"policyVersion": "mvp3-v1"/);
     const recorded = run(process.execPath, [
       ...offline(["record"]), "--type", "PITFALL", "--summary", "Do not retry settlement in a transaction",
       "--file", "src/settlement.ts",
@@ -55,6 +57,9 @@ test("CLI completes MVP-0 flow and real MCP stdio handshake", async () => {
     const resumeSuite = run(process.execPath, offline(["benchmark", resolve("fixtures/resume-10/fixture.json")]), repository, dataDir);
     assert.match(resumeSuite.stdout, /"validPacks": 10/);
     assert.match(resumeSuite.stdout, /"medianFileReadReductionPercent": 40/);
+    const retentionSuite = run(process.execPath, offline(["benchmark", resolve("fixtures/retention-180d/fixture.json")]), repository, dataDir);
+    assert.match(retentionSuite.stdout, /"kind": "retention-suite"/);
+    assert.match(retentionSuite.stdout, /"canonicalAutoPurgeCount": 0/);
 
     const claudeDryRun = run(process.execPath, offline(["claude", "install", "--dry-run"]), repository, dataDir);
     assert.match(claudeDryRun.stdout, /no files were changed/);

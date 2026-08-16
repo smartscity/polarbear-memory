@@ -1,0 +1,7 @@
+{
+  "kind": "retention-suite",
+  "name": "mvp3-four-layer-retention-180d",
+  "days": 180,
+  "criticalPitfallQuery": "rare settlement deadlock writer lock",
+  "criticalPitfallSummary": "Rare settlement deadlock occurs when recovery holds the writer lock"
+}

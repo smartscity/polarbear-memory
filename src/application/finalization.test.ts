@@ -23,6 +23,16 @@ test("does not extract conversational filler or unsafe relative paths", () => {
   assert.deepEqual(candidates[0]?.files, []);
 });
 
+test("accepts explicit completion markers without guessing task completion", () => {
+  const [completed, open] = extractCandidates([
+    "Task state: [completed] Recovery endpoint shipped.",
+    "Next step: Authorization tests are being considered.",
+  ].join("\n"));
+  assert.equal(completed?.completionState, "COMPLETED");
+  assert.equal(completed?.summary, "Recovery endpoint shipped.");
+  assert.equal(open?.completionState, undefined);
+});
+
 test("10-session fixture clears the automatic handoff usefulness gate", () => {
   const fixture = JSON.parse(readFileSync(resolve("fixtures/automatic-handoff/fixture.json"), "utf8")) as {
     sessions: Array<{ lastAssistantMessage: string; expectedType: string; expectedSummary: string }>;

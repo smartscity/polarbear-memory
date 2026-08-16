@@ -1,5 +1,6 @@
 import type { Memory, MemorySearchResult, RecordMemoryInput, VerificationState } from "../domain/memory.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
+import type { CompletionState, FileAnchor, MaintenanceAction, MemoryRelationType } from "../domain/lifecycle.js";
 
 export interface MemoryStore {
   initializeProject(project: { id: string; name: string }): void;
@@ -7,8 +8,17 @@ export interface MemoryStore {
   get(projectId: string, memoryId: string): Memory | undefined;
   search(projectId: string, query: string, limit: number): MemorySearchResult[];
   recent(projectId: string, limit: number): MemorySearchResult[];
-  verify(projectId: string, memoryId: string, state: VerificationState, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
+  verify(projectId: string, memoryId: string, state: VerificationState, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP", evidence?: { anchors?: FileAnchor[]; checkedCommit?: string }): Memory;
   archive(projectId: string, memoryId: string, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
+  restore(projectId: string, memoryId: string, reason: string): Memory;
+  complete(projectId: string, memoryId: string, state: Exclude<CompletionState, "OPEN">, reason: string, now?: Date): Memory;
+  addRelation(projectId: string, sourceMemoryId: string, targetMemoryId: string, type: MemoryRelationType, reason: string): void;
+  noteContextUsage(projectId: string, candidateIds: string[], selectedIds: string[], now: string): void;
+  noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory;
+  maintenanceCursor(projectId: string): string | undefined;
+  maintenanceCandidates(projectId: string, limit: number, targetCommit?: string, archiveBefore?: string, now?: string, changedPaths?: string[]): Memory[];
+  countExpiredRawEvents(projectId: string, now: string): number;
+  applyMaintenance(projectId: string, actions: MaintenanceAction[], cursorCommit: string | undefined, now: string, policyVersion: string, assessorVersion: string): number;
   ingestRawEvent(event: EventEnvelope): boolean;
   unprocessedRawEvents(projectId: string, sessionRefHash: string): StoredRawEvent[];
   pendingEndedSessions(projectId: string): string[];

@@ -341,6 +341,26 @@ Add recovery coverage for terminal settlement state.
 
 默认不弹出打断用户的确认框。低置信内容进入 `CANDIDATE`，不会伪装成已验证事实。
 
+MVP-3 中，Agent 可以用显式标记声明短期事项已经结束：
+
+```text
+Task state: [completed] Recovery endpoint shipped.
+Next step: [cancelled] Remove the obsolete compatibility test.
+```
+
+只有 `[completed]` / `[cancelled]`（也支持 `[已完成]` / `[已取消]`）会触发完成状态；系统不会根据“看起来像做完了”自行猜测。完成项立即退出普通 Context，七天后才会被可逆归档。
+
+用户可预览和执行本地治理：
+
+```bash
+polarbear-memory maintain --dry-run
+polarbear-memory maintain
+polarbear-memory complete MEMORY_ID --result completed --reason "Tests passed"
+polarbear-memory restore MEMORY_ID --reason "Need historical review"
+```
+
+`maintain --dry-run` 与正式执行使用同一计划。自动维护可以删除到期 Raw Event，但 canonical Memory 最多进入 `ARCHIVED`，不会被物理删除。
+
 ## 10. 第二天继续工作
 
 重新启动 Claude Code，直接说：

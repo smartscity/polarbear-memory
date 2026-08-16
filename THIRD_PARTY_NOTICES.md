@@ -1,6 +1,6 @@
 # Third-party notices
 
-Polarbear Memory MVP-2 uses a deliberately small third-party runtime surface:
+Polarbear Memory MVP-3 uses a deliberately small third-party runtime surface:
 
 | Package | Version | License | Distribution role |
 | --- | --- | --- | --- |

@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import type { Memory, MemorySearchResult, MemoryType, RecordMemoryInput, VerificationState } from "../domain/memory.js";
+import type {
+  CompletionState,
+  CorrectnessRisk,
+  FileAnchor,
+  MaintenanceAction,
+  MemoryRelationType,
+} from "../domain/lifecycle.js";
+import { ASSESSOR_VERSION, POLICY_VERSION } from "../domain/lifecycle.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 import { validateRecordInput } from "../domain/memory.js";
 import type { MemoryStore } from "../application/ports.js";
@@ -13,6 +21,9 @@ interface MemoryRow {
   content: string;
   lifecycle_status: string;
   verification_state: string;
+  correctness_risk: string;
+  relevance_milli: number;
+  completion_state: string;
   confidence_milli: number;
   importance_milli: number;
   source_type: string;
@@ -20,6 +31,10 @@ interface MemoryRow {
   branch_name: string | null;
   created_at: string;
   updated_at: string;
+  last_checked_commit: string | null;
+  last_assessed_at: string | null;
+  completed_at: string | null;
+  restore_protected_until: string | null;
 }
 
 const SCHEMA = `
@@ -47,6 +62,11 @@ CREATE TABLE IF NOT EXISTS memories (
     CHECK (lifecycle_status IN ('ACTIVE','ARCHIVED','SUPERSEDED','REJECTED')),
   verification_state TEXT NOT NULL DEFAULT 'UNVERIFIED'
     CHECK (verification_state IN ('UNVERIFIED','VERIFIED','DISPUTED')),
+  correctness_risk TEXT NOT NULL DEFAULT 'LOW'
+    CHECK (correctness_risk IN ('LOW','MEDIUM','HIGH')),
+  relevance_milli INTEGER NOT NULL DEFAULT 500 CHECK (relevance_milli BETWEEN 0 AND 1000),
+  completion_state TEXT NOT NULL DEFAULT 'OPEN'
+    CHECK (completion_state IN ('OPEN','COMPLETED','CANCELLED')),
   confidence_milli INTEGER NOT NULL CHECK (confidence_milli BETWEEN 0 AND 1000),
   importance_milli INTEGER NOT NULL CHECK (importance_milli BETWEEN 0 AND 1000),
   source_type TEXT NOT NULL CHECK (source_type IN ('CLI','MCP','HOOK','FIXTURE')),
@@ -54,7 +74,11 @@ CREATE TABLE IF NOT EXISTS memories (
   branch_name TEXT,
   content_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  last_checked_commit TEXT,
+  last_assessed_at TEXT,
+  completed_at TEXT,
+  restore_protected_until TEXT
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS memories_project_status
@@ -79,6 +103,56 @@ CREATE TABLE IF NOT EXISTS memory_revisions (
   actor_kind TEXT NOT NULL CHECK (actor_kind IN ('HUMAN_CLI','AGENT_MCP','SYSTEM')),
   created_at TEXT NOT NULL,
   UNIQUE(memory_id, revision_no)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS memory_anchors (
+  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  repo_relative_path TEXT NOT NULL,
+  content_digest TEXT,
+  captured_commit TEXT,
+  PRIMARY KEY(memory_id, repo_relative_path)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS memory_relations (
+  source_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  target_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  relation_type TEXT NOT NULL CHECK (relation_type IN ('SUPERSEDES','CONTRADICTS')),
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(source_memory_id, target_memory_id, relation_type),
+  CHECK (source_memory_id <> target_memory_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS memory_usage_stats (
+  memory_id TEXT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+  candidate_count INTEGER NOT NULL DEFAULT 0,
+  selected_count INTEGER NOT NULL DEFAULT 0,
+  positive_feedback_count INTEGER NOT NULL DEFAULT 0,
+  negative_feedback_count INTEGER NOT NULL DEFAULT 0,
+  last_candidate_at TEXT,
+  last_selected_at TEXT,
+  last_feedback_at TEXT
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS lifecycle_assessments (
+  id TEXT PRIMARY KEY,
+  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  previous_risk TEXT NOT NULL,
+  new_risk TEXT NOT NULL,
+  previous_lifecycle TEXT NOT NULL,
+  new_lifecycle TEXT NOT NULL,
+  relevance_milli INTEGER NOT NULL,
+  checked_commit TEXT,
+  reason_codes_json TEXT NOT NULL,
+  policy_version TEXT NOT NULL,
+  assessor_version TEXT NOT NULL,
+  assessed_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS maintenance_cursors (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  checked_commit TEXT,
+  updated_at TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -147,25 +221,35 @@ export class SqliteMemoryStore implements MemoryStore {
     this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
     this.#db.exec(SCHEMA);
     this.#migrateMemorySourceTypes();
+    this.#migrateLifecycleColumns();
+    this.#migrateUsageColumns();
+    this.#db.exec(`
+      CREATE INDEX IF NOT EXISTS memories_maintenance
+        ON memories(project_id, lifecycle_status, last_checked_commit, completed_at);
+    `);
     this.#db.exec(`
       INSERT OR IGNORE INTO memory_revisions(
         id, memory_id, revision_no, content, summary, reason, actor_kind, created_at
       )
       SELECT 'migration-v2-' || id, id, 1, content, summary, 'migrated', 'SYSTEM', created_at
       FROM memories;
+      INSERT OR IGNORE INTO memory_usage_stats(memory_id) SELECT id FROM memories;
+      INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path)
+        SELECT memory_id, repo_relative_path FROM memory_files;
     `);
     const migrationTime = new Date().toISOString();
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
+    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?)").run(migrationTime);
   }
 
   initializeProject(project: { id: string; name: string }): void {
     const now = new Date().toISOString();
     this.#db.prepare(`
       INSERT INTO projects(id, display_name, created_at, last_seen_at, schema_version)
-      VALUES (?, ?, ?, ?, 3)
-      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at, schema_version = 3
+      VALUES (?, ?, ?, ?, 4)
+      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at, schema_version = 4
     `).run(project.id, project.name, now, now);
   }
 
@@ -177,7 +261,9 @@ export class SqliteMemoryStore implements MemoryStore {
     const confidence = input.confidence ?? 700;
     const importance = input.importance ?? 500;
     const sourceType = input.sourceType ?? "CLI";
+    const completionState = input.completionState ?? "OPEN";
     const hash = createHash("sha256").update(`${input.type}\0${input.summary.trim()}\0${content}`).digest("hex");
+    const supersededIds: string[] = [];
 
     this.#db.exec("BEGIN IMMEDIATE");
     try {
@@ -186,7 +272,21 @@ export class SqliteMemoryStore implements MemoryStore {
       ).get(projectId, hash) as { id: string } | undefined;
       if (duplicate) {
         const insertFile = this.#db.prepare("INSERT OR IGNORE INTO memory_files(memory_id, repo_relative_path) VALUES (?, ?)");
-        for (const file of new Set(input.files ?? [])) insertFile.run(duplicate.id, file);
+        const insertEmptyAnchor = this.#db.prepare("INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path) VALUES (?, ?)");
+        for (const file of new Set(input.files ?? [])) {
+          insertFile.run(duplicate.id, file);
+          insertEmptyAnchor.run(duplicate.id, file);
+        }
+        const upsertAnchor = this.#db.prepare(`
+          INSERT INTO memory_anchors(memory_id, repo_relative_path, content_digest, captured_commit)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(memory_id, repo_relative_path) DO UPDATE SET
+            content_digest = excluded.content_digest,
+            captured_commit = excluded.captured_commit
+        `);
+        for (const anchor of input.fileAnchors ?? []) {
+          upsertAnchor.run(duplicate.id, anchor.path, anchor.contentDigest ?? null, anchor.capturedCommit ?? null);
+        }
         this.#db.exec("COMMIT");
         const existing = this.get(projectId, duplicate.id);
         if (!existing) throw new Error("Memory disappeared after deduplication.");
@@ -204,16 +304,43 @@ export class SqliteMemoryStore implements MemoryStore {
           this.#appendRevision(previous, `superseded-by:${id}`, sourceType === "MCP" ? "AGENT_MCP" : "SYSTEM", now);
           this.#db.prepare("UPDATE memories SET lifecycle_status = 'SUPERSEDED', updated_at = ? WHERE id = ?")
             .run(now, row.id);
+          this.#db.prepare(`
+            INSERT INTO lifecycle_assessments(
+              id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+              relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+            ) VALUES (?, ?, ?, ?, 'ACTIVE', 'SUPERSEDED', ?, ?, ?, ?, ?, ?)
+          `).run(
+            randomUUID(),
+            row.id,
+            previous.correctnessRisk,
+            previous.correctnessRisk,
+            previous.relevance,
+            input.commitSha ?? previous.lastCheckedCommit ?? null,
+            JSON.stringify(["TASK_STATE_SINGLE_ACTIVE"]),
+            POLICY_VERSION,
+            ASSESSOR_VERSION,
+            now,
+          );
+          supersededIds.push(row.id);
         }
       }
       this.#db.prepare(`
         INSERT INTO memories(
           id, project_id, type, summary, content, confidence_milli, importance_milli,
-          source_type, commit_sha, branch_name, content_hash, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          relevance_milli, completion_state, completed_at, source_type, commit_sha, branch_name,
+          content_hash, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id, projectId, input.type, input.summary.trim(), content, confidence, importance,
-        sourceType, input.commitSha ?? null, input.branchName ?? null, hash, now, now,
+        completionState === "OPEN" ? importance : 0,
+        completionState,
+        completionState === "OPEN" ? null : now,
+        sourceType,
+        input.commitSha ?? null,
+        input.branchName ?? null,
+        hash,
+        now,
+        now,
       );
       this.#db.prepare(`
         INSERT INTO memory_revisions(id, memory_id, revision_no, content, summary, reason, actor_kind, created_at)
@@ -227,7 +354,28 @@ export class SqliteMemoryStore implements MemoryStore {
         now,
       );
       const insertFile = this.#db.prepare("INSERT INTO memory_files(memory_id, repo_relative_path) VALUES (?, ?)");
-      for (const file of new Set(input.files ?? [])) insertFile.run(id, file);
+      const insertEmptyAnchor = this.#db.prepare("INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path) VALUES (?, ?)");
+      for (const file of new Set(input.files ?? [])) {
+        insertFile.run(id, file);
+        insertEmptyAnchor.run(id, file);
+      }
+      const insertAnchor = this.#db.prepare(`
+        INSERT INTO memory_anchors(memory_id, repo_relative_path, content_digest, captured_commit)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(memory_id, repo_relative_path) DO UPDATE SET
+          content_digest = excluded.content_digest,
+          captured_commit = excluded.captured_commit
+      `);
+      for (const anchor of input.fileAnchors ?? []) {
+        insertAnchor.run(id, anchor.path, anchor.contentDigest ?? null, anchor.capturedCommit ?? null);
+      }
+      this.#db.prepare("INSERT INTO memory_usage_stats(memory_id) VALUES (?)").run(id);
+      for (const targetId of supersededIds) {
+        this.#db.prepare(`
+          INSERT INTO memory_relations(source_memory_id, target_memory_id, relation_type, reason, created_at)
+          VALUES (?, ?, 'SUPERSEDES', 'task-state-single-active', ?)
+        `).run(id, targetId, now);
+      }
       this.#db.exec("COMMIT");
     } catch (error) {
       this.#db.exec("ROLLBACK");
@@ -251,7 +399,9 @@ export class SqliteMemoryStore implements MemoryStore {
       FROM memory_fts
       JOIN memories m ON m.row_id = memory_fts.rowid
       WHERE memory_fts MATCH ? AND m.project_id = ? AND m.lifecycle_status = 'ACTIVE'
-      ORDER BY fts_rank ASC, m.importance_milli DESC, m.updated_at DESC, m.id ASC
+        AND m.completion_state = 'OPEN'
+      ORDER BY CASE m.correctness_risk WHEN 'LOW' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END,
+        fts_rank ASC, m.relevance_milli DESC, m.importance_milli DESC, m.updated_at DESC, m.id ASC
       LIMIT ?
     `).all(match, projectId, limit) as unknown as Array<MemoryRow & { fts_rank: number }>;
     return rows.map((row, index) => ({ memory: this.#toMemory(row), rank: index + 1 }));
@@ -260,8 +410,9 @@ export class SqliteMemoryStore implements MemoryStore {
   recent(projectId: string, limit: number): MemorySearchResult[] {
     const rows = this.#db.prepare(`
       SELECT * FROM memories
-      WHERE project_id = ? AND lifecycle_status = 'ACTIVE'
-      ORDER BY importance_milli DESC, updated_at DESC, id ASC LIMIT ?
+      WHERE project_id = ? AND lifecycle_status = 'ACTIVE' AND completion_state = 'OPEN'
+      ORDER BY CASE correctness_risk WHEN 'LOW' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END,
+        relevance_milli DESC, importance_milli DESC, updated_at DESC, id ASC LIMIT ?
     `).all(projectId, limit) as unknown as MemoryRow[];
     return rows.map((row, index) => ({ memory: this.#toMemory(row), rank: index + 1 }));
   }
@@ -272,16 +423,46 @@ export class SqliteMemoryStore implements MemoryStore {
     state: VerificationState,
     reason: string,
     actor: "HUMAN_CLI" | "AGENT_MCP" = "AGENT_MCP",
+    evidence: { anchors?: FileAnchor[]; checkedCommit?: string } = {},
   ): Memory {
     this.#validateReason(reason, "Verification");
     const memory = this.get(projectId, memoryId);
     if (!memory) throw new Error(`Memory not found: ${memoryId}`);
-    if (memory.verificationState === state) return memory;
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db.prepare("UPDATE memories SET verification_state = ?, updated_at = ? WHERE project_id = ? AND id = ?")
-        .run(state, now, projectId, memoryId);
+      this.#db.prepare(`
+        UPDATE memories SET verification_state = ?, correctness_risk = 'LOW',
+          last_checked_commit = coalesce(?, last_checked_commit), last_assessed_at = ?, updated_at = ?
+        WHERE project_id = ? AND id = ?
+      `).run(state, evidence.checkedCommit ?? null, now, now, projectId, memoryId);
+      const upsertAnchor = this.#db.prepare(`
+        INSERT INTO memory_anchors(memory_id, repo_relative_path, content_digest, captured_commit)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(memory_id, repo_relative_path) DO UPDATE SET
+          content_digest = excluded.content_digest, captured_commit = excluded.captured_commit
+      `);
+      for (const anchor of evidence.anchors ?? []) {
+        upsertAnchor.run(memoryId, anchor.path, anchor.contentDigest ?? null, anchor.capturedCommit ?? null);
+      }
+      this.#db.prepare(`
+        INSERT INTO lifecycle_assessments(
+          id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+          relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+        ) VALUES (?, ?, ?, 'LOW', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        memoryId,
+        memory.correctnessRisk,
+        memory.lifecycleStatus,
+        memory.lifecycleStatus,
+        memory.relevance,
+        evidence.checkedCommit ?? null,
+        JSON.stringify([actor === "HUMAN_CLI" ? "HUMAN_VERIFIED_CURRENT_SOURCE" : "AGENT_VERIFIED_CURRENT_SOURCE"]),
+        POLICY_VERSION,
+        ASSESSOR_VERSION,
+        now,
+      );
       this.#appendRevision(memory, `verification:${state}:${reason.trim()}`, actor, now);
       this.#db.exec("COMMIT");
     } catch (error) {
@@ -308,6 +489,24 @@ export class SqliteMemoryStore implements MemoryStore {
     try {
       this.#db.prepare("UPDATE memories SET lifecycle_status = 'ARCHIVED', updated_at = ? WHERE project_id = ? AND id = ?")
         .run(now, projectId, memoryId);
+      this.#db.prepare(`
+        INSERT INTO lifecycle_assessments(
+          id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+          relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+        ) VALUES (?, ?, ?, ?, ?, 'ARCHIVED', ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        memoryId,
+        memory.correctnessRisk,
+        memory.correctnessRisk,
+        memory.lifecycleStatus,
+        memory.relevance,
+        memory.lastCheckedCommit ?? null,
+        JSON.stringify([actor === "HUMAN_CLI" ? "HUMAN_ARCHIVE" : "AGENT_ARCHIVE"]),
+        POLICY_VERSION,
+        ASSESSOR_VERSION,
+        now,
+      );
       this.#appendRevision(memory, `archive:${reason.trim()}`, actor, now);
       this.#db.exec("COMMIT");
     } catch (error) {
@@ -317,6 +516,300 @@ export class SqliteMemoryStore implements MemoryStore {
     const updated = this.get(projectId, memoryId);
     if (!updated) throw new Error(`Memory not found after archive: ${memoryId}`);
     return updated;
+  }
+
+  restore(projectId: string, memoryId: string, reason: string): Memory {
+    this.#validateReason(reason, "Restore");
+    const memory = this.get(projectId, memoryId);
+    if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+    if (memory.lifecycleStatus !== "ARCHIVED") throw new Error("Only archived Memory can be restored.");
+    const now = new Date();
+    const protectedUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        UPDATE memories SET lifecycle_status = 'ACTIVE', restore_protected_until = ?, updated_at = ?
+        WHERE project_id = ? AND id = ?
+      `).run(protectedUntil, now.toISOString(), projectId, memoryId);
+      this.#db.prepare(`
+        INSERT INTO lifecycle_assessments(
+          id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+          relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+        ) VALUES (?, ?, ?, ?, 'ARCHIVED', 'ACTIVE', ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        memoryId,
+        memory.correctnessRisk,
+        memory.correctnessRisk,
+        memory.relevance,
+        memory.lastCheckedCommit ?? null,
+        JSON.stringify(["HUMAN_RESTORE_GRACE_30D"]),
+        POLICY_VERSION,
+        ASSESSOR_VERSION,
+        now.toISOString(),
+      );
+      this.#appendRevision(memory, `restore:${reason.trim()}`, "HUMAN_CLI", now.toISOString());
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    const restored = this.get(projectId, memoryId);
+    if (!restored) throw new Error(`Memory not found after restore: ${memoryId}`);
+    return restored;
+  }
+
+  complete(
+    projectId: string,
+    memoryId: string,
+    state: Exclude<CompletionState, "OPEN">,
+    reason: string,
+    clock = new Date(),
+  ): Memory {
+    this.#validateReason(reason, "Completion");
+    const memory = this.get(projectId, memoryId);
+    if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+    if (memory.type !== "TASK_STATE" && memory.type !== "TODO") {
+      throw new Error("Only TASK_STATE and TODO Memory can be completed or cancelled.");
+    }
+    if (memory.completionState === state) return memory;
+    const now = clock.toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        UPDATE memories SET completion_state = ?, completed_at = ?, relevance_milli = 0, updated_at = ?
+        WHERE project_id = ? AND id = ?
+      `).run(state, now, now, projectId, memoryId);
+      this.#appendRevision(memory, `completion:${state}:${reason.trim()}`, "HUMAN_CLI", now);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    const completed = this.get(projectId, memoryId);
+    if (!completed) throw new Error(`Memory not found after completion: ${memoryId}`);
+    return completed;
+  }
+
+  addRelation(
+    projectId: string,
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    type: MemoryRelationType,
+    reason: string,
+  ): void {
+    this.#validateReason(reason, "Relation");
+    if (sourceMemoryId === targetMemoryId) throw new Error("A Memory cannot relate to itself.");
+    const source = this.get(projectId, sourceMemoryId);
+    const target = this.get(projectId, targetMemoryId);
+    if (!source || !target) throw new Error("Both related Memory records must exist in this project.");
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        INSERT OR IGNORE INTO memory_relations(
+          source_memory_id, target_memory_id, relation_type, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(sourceMemoryId, targetMemoryId, type, reason.trim(), now);
+      if (type === "SUPERSEDES" && target.lifecycleStatus === "ACTIVE") {
+        this.#db.prepare("UPDATE memories SET lifecycle_status = 'SUPERSEDED', updated_at = ? WHERE id = ?")
+          .run(now, targetMemoryId);
+        this.#db.prepare(`
+          INSERT INTO lifecycle_assessments(
+            id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+            relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+          ) VALUES (?, ?, ?, ?, 'ACTIVE', 'SUPERSEDED', ?, ?, ?, ?, ?, ?)
+        `).run(
+          randomUUID(),
+          targetMemoryId,
+          target.correctnessRisk,
+          target.correctnessRisk,
+          target.relevance,
+          source.commitSha ?? target.lastCheckedCommit ?? null,
+          JSON.stringify(["EXPLICIT_SUPERSEDES"]),
+          POLICY_VERSION,
+          ASSESSOR_VERSION,
+          now,
+        );
+        this.#appendRevision(target, `superseded-by:${sourceMemoryId}:${reason.trim()}`, "HUMAN_CLI", now);
+      } else if (type === "CONTRADICTS") {
+        this.#db.prepare(`
+          UPDATE memories SET verification_state = 'DISPUTED', updated_at = ?
+          WHERE project_id = ? AND id IN (?, ?)
+        `).run(now, projectId, sourceMemoryId, targetMemoryId);
+        this.#appendRevision(source, `contradicts:${targetMemoryId}:${reason.trim()}`, "HUMAN_CLI", now);
+        this.#appendRevision(target, `contradicts:${sourceMemoryId}:${reason.trim()}`, "HUMAN_CLI", now);
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  noteContextUsage(projectId: string, candidateIds: string[], selectedIds: string[], now: string): void {
+    const candidates = [...new Set(candidateIds)].slice(0, 50);
+    const selected = [...new Set(selectedIds)].filter((id) => candidates.includes(id)).slice(0, 50);
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const candidateStatement = this.#db.prepare(`
+        UPDATE memory_usage_stats SET candidate_count = candidate_count + 1, last_candidate_at = ?
+        WHERE memory_id = ? AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND project_id = ?)
+      `);
+      for (const id of candidates) candidateStatement.run(now, id, id, projectId);
+      const selectedStatement = this.#db.prepare(`
+        UPDATE memory_usage_stats SET selected_count = selected_count + 1, last_selected_at = ?
+        WHERE memory_id = ? AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND project_id = ?)
+      `);
+      for (const id of selected) selectedStatement.run(now, id, id, projectId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory {
+    this.#validateReason(reason, "Feedback");
+    const memory = this.get(projectId, memoryId);
+    if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+    const now = new Date().toISOString();
+    const column = useful ? "positive_feedback_count" : "negative_feedback_count";
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`UPDATE memory_usage_stats SET ${column} = ${column} + 1, last_feedback_at = ? WHERE memory_id = ?`)
+        .run(now, memoryId);
+      this.#appendRevision(memory, `feedback:${useful ? "USEFUL" : "NOT_USEFUL"}:${reason.trim()}`, "HUMAN_CLI", now);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    const updated = this.get(projectId, memoryId);
+    if (!updated) throw new Error(`Memory not found after feedback: ${memoryId}`);
+    return updated;
+  }
+
+  maintenanceCursor(projectId: string): string | undefined {
+    const row = this.#db.prepare("SELECT checked_commit FROM maintenance_cursors WHERE project_id = ?")
+      .get(projectId) as { checked_commit: string | null } | undefined;
+    return row?.checked_commit ?? undefined;
+  }
+
+  maintenanceCandidates(
+    projectId: string,
+    limit: number,
+    targetCommit?: string,
+    archiveBefore?: string,
+    now?: string,
+    changedPaths: string[] = [],
+  ): Memory[] {
+    const paths = [...new Set(changedPaths)].slice(0, 1_000);
+    const changedAnchorClause = paths.length > 0
+      ? ` OR EXISTS (
+          SELECT 1 FROM memory_anchors a
+          WHERE a.memory_id = memories.id AND a.repo_relative_path IN (${paths.map(() => "?").join(",")})
+        )`
+      : "";
+    const rows = this.#db.prepare(`
+      SELECT * FROM memories WHERE project_id = ? AND lifecycle_status = 'ACTIVE'
+        AND (? IS NULL OR coalesce(last_checked_commit, '') <> ?
+          OR (completion_state <> 'OPEN' AND completed_at <= ?
+            AND (restore_protected_until IS NULL OR restore_protected_until <= ?))
+          OR correctness_risk = 'HIGH'
+          OR EXISTS (
+            SELECT 1 FROM memory_usage_stats u WHERE u.memory_id = memories.id
+              AND (coalesce(u.last_candidate_at, '') > coalesce(memories.last_assessed_at, '')
+                OR coalesce(u.last_selected_at, '') > coalesce(memories.last_assessed_at, '')
+                OR coalesce(u.last_feedback_at, '') > coalesce(memories.last_assessed_at, ''))
+          )${changedAnchorClause})
+      ORDER BY coalesce(last_assessed_at, created_at), id LIMIT ?
+    `).all(
+      projectId,
+      targetCommit ?? null,
+      targetCommit ?? null,
+      archiveBefore ?? "",
+      now ?? "",
+      ...paths,
+      limit,
+    ) as unknown as MemoryRow[];
+    return rows.map((row) => this.#toMemory(row));
+  }
+
+  countExpiredRawEvents(projectId: string, now: string): number {
+    const row = this.#db.prepare("SELECT count(*) AS count FROM raw_events WHERE project_id = ? AND expires_at <= ?")
+      .get(projectId, now) as { count: number };
+    return row.count;
+  }
+
+  applyMaintenance(
+    projectId: string,
+    actions: MaintenanceAction[],
+    cursorCommit: string | undefined,
+    now: string,
+    policyVersion: string,
+    assessorVersion: string,
+  ): number {
+    let rawEventsDeleted = 0;
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const action of actions) {
+        const memory = this.get(projectId, action.memoryId);
+        if (!memory) continue;
+        const stateChanged = memory.correctnessRisk !== action.newRisk
+          || memory.lifecycleStatus !== action.newLifecycle
+          || memory.relevance !== action.relevance
+          || memory.lastCheckedCommit !== action.checkedCommit;
+        if (!stateChanged) continue;
+        this.#db.prepare(`
+          UPDATE memories SET correctness_risk = ?, lifecycle_status = ?, relevance_milli = ?,
+            last_checked_commit = ?, last_assessed_at = ?, updated_at = ?
+          WHERE project_id = ? AND id = ?
+        `).run(
+          action.newRisk,
+          action.newLifecycle,
+          action.relevance,
+          action.checkedCommit ?? null,
+          now,
+          now,
+          projectId,
+          action.memoryId,
+        );
+        if (memory.lifecycleStatus !== action.newLifecycle) {
+          this.#appendRevision(memory, `maintenance:${action.reasonCodes.join(",")}`, "SYSTEM", now);
+        }
+        this.#db.prepare(`
+          INSERT INTO lifecycle_assessments(
+            id, memory_id, previous_risk, new_risk, previous_lifecycle, new_lifecycle,
+            relevance_milli, checked_commit, reason_codes_json, policy_version, assessor_version, assessed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          randomUUID(),
+          action.memoryId,
+          action.previousRisk,
+          action.newRisk,
+          action.previousLifecycle,
+          action.newLifecycle,
+          action.relevance,
+          action.checkedCommit ?? null,
+          JSON.stringify(action.reasonCodes),
+          policyVersion,
+          assessorVersion,
+          now,
+        );
+      }
+      rawEventsDeleted = Number(this.#db.prepare("DELETE FROM raw_events WHERE project_id = ? AND expires_at <= ?")
+        .run(projectId, now).changes);
+      this.#db.prepare(`
+        INSERT INTO maintenance_cursors(project_id, checked_commit, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET checked_commit = excluded.checked_commit, updated_at = excluded.updated_at
+      `).run(projectId, cursorCommit ?? null, now);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return rawEventsDeleted;
   }
 
   ingestRawEvent(event: EventEnvelope): boolean {
@@ -395,6 +888,14 @@ export class SqliteMemoryStore implements MemoryStore {
       total += row.count;
     }
     result.total = total;
+    const risk = this.#db.prepare(`
+      SELECT
+        sum(CASE WHEN correctness_risk = 'HIGH' AND lifecycle_status = 'ACTIVE' THEN 1 ELSE 0 END) AS high_risk,
+        sum(CASE WHEN completion_state <> 'OPEN' AND lifecycle_status = 'ACTIVE' THEN 1 ELSE 0 END) AS completed
+      FROM memories WHERE project_id = ?
+    `).get(projectId) as { high_risk: number | null; completed: number | null };
+    result.high_risk = risk.high_risk ?? 0;
+    result.completed = risk.completed ?? 0;
     return result;
   }
 
@@ -479,9 +980,62 @@ export class SqliteMemoryStore implements MemoryStore {
     if (violations.length > 0) throw new Error("Memory database migration produced foreign-key violations.");
   }
 
+  #migrateLifecycleColumns(): void {
+    const columns = new Set((this.#db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>)
+      .map((column) => column.name));
+    const additions = [
+      ["correctness_risk", "TEXT NOT NULL DEFAULT 'LOW' CHECK (correctness_risk IN ('LOW','MEDIUM','HIGH'))"],
+      ["relevance_milli", "INTEGER NOT NULL DEFAULT 500 CHECK (relevance_milli BETWEEN 0 AND 1000)"],
+      ["completion_state", "TEXT NOT NULL DEFAULT 'OPEN' CHECK (completion_state IN ('OPEN','COMPLETED','CANCELLED'))"],
+      ["last_checked_commit", "TEXT"],
+      ["last_assessed_at", "TEXT"],
+      ["completed_at", "TEXT"],
+      ["restore_protected_until", "TEXT"],
+    ] as const;
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) this.#db.exec(`ALTER TABLE memories ADD COLUMN ${name} ${definition}`);
+    }
+  }
+
+  #migrateUsageColumns(): void {
+    const columns = new Set((this.#db.prepare("PRAGMA table_info(memory_usage_stats)").all() as Array<{ name: string }>)
+      .map((column) => column.name));
+    if (!columns.has("last_feedback_at")) this.#db.exec("ALTER TABLE memory_usage_stats ADD COLUMN last_feedback_at TEXT");
+  }
+
   #toMemory(row: MemoryRow): Memory {
     const files = this.#db.prepare("SELECT repo_relative_path FROM memory_files WHERE memory_id = ? ORDER BY repo_relative_path")
       .all(row.id) as Array<{ repo_relative_path: string }>;
+    const anchors = this.#db.prepare(`
+      SELECT repo_relative_path, content_digest, captured_commit
+      FROM memory_anchors WHERE memory_id = ? ORDER BY repo_relative_path
+    `).all(row.id) as Array<{ repo_relative_path: string; content_digest: string | null; captured_commit: string | null }>;
+    const relations = this.#db.prepare(`
+      SELECT source_memory_id, target_memory_id, relation_type, reason, created_at
+      FROM memory_relations WHERE source_memory_id = ? OR target_memory_id = ?
+      ORDER BY created_at, source_memory_id, target_memory_id
+    `).all(row.id, row.id) as Array<{
+      source_memory_id: string;
+      target_memory_id: string;
+      relation_type: string;
+      reason: string;
+      created_at: string;
+    }>;
+    const usage = this.#db.prepare("SELECT * FROM memory_usage_stats WHERE memory_id = ?").get(row.id) as {
+      candidate_count: number;
+      selected_count: number;
+      positive_feedback_count: number;
+      negative_feedback_count: number;
+      last_candidate_at: string | null;
+      last_selected_at: string | null;
+      last_feedback_at: string | null;
+    } | undefined;
+    const assessment = this.#db.prepare(`
+      SELECT * FROM lifecycle_assessments WHERE memory_id = ?
+      ORDER BY assessed_at DESC, id DESC LIMIT 1
+    `).get(row.id) as Record<string, string | number | null> | undefined;
+    const revision = this.#db.prepare("SELECT count(*) AS count FROM memory_revisions WHERE memory_id = ?")
+      .get(row.id) as { count: number };
     return {
       id: row.id,
       projectId: row.project_id,
@@ -490,12 +1044,55 @@ export class SqliteMemoryStore implements MemoryStore {
       content: row.content,
       lifecycleStatus: row.lifecycle_status as Memory["lifecycleStatus"],
       verificationState: row.verification_state as Memory["verificationState"],
+      correctnessRisk: (row.correctness_risk ?? "LOW") as CorrectnessRisk,
+      relevance: row.relevance_milli ?? row.importance_milli,
+      completionState: (row.completion_state ?? "OPEN") as CompletionState,
       confidence: row.confidence_milli,
       importance: row.importance_milli,
       sourceType: row.source_type as Memory["sourceType"],
       ...(row.commit_sha ? { commitSha: row.commit_sha } : {}),
       ...(row.branch_name ? { branchName: row.branch_name } : {}),
       files: files.map((file) => file.repo_relative_path),
+      fileAnchors: anchors.map((anchor) => ({
+        path: anchor.repo_relative_path,
+        ...(anchor.content_digest ? { contentDigest: anchor.content_digest } : {}),
+        ...(anchor.captured_commit ? { capturedCommit: anchor.captured_commit } : {}),
+      })),
+      relations: relations.map((relation) => ({
+        sourceMemoryId: relation.source_memory_id,
+        targetMemoryId: relation.target_memory_id,
+        type: relation.relation_type as MemoryRelationType,
+        reason: relation.reason,
+        createdAt: relation.created_at,
+      })),
+      usage: {
+        candidateCount: usage?.candidate_count ?? 0,
+        selectedCount: usage?.selected_count ?? 0,
+        positiveFeedbackCount: usage?.positive_feedback_count ?? 0,
+        negativeFeedbackCount: usage?.negative_feedback_count ?? 0,
+        ...(usage?.last_candidate_at ? { lastCandidateAt: usage.last_candidate_at } : {}),
+        ...(usage?.last_selected_at ? { lastSelectedAt: usage.last_selected_at } : {}),
+        ...(usage?.last_feedback_at ? { lastFeedbackAt: usage.last_feedback_at } : {}),
+      },
+      revisionCount: revision.count,
+      ...(assessment ? {
+        latestAssessment: {
+          previousRisk: String(assessment.previous_risk) as CorrectnessRisk,
+          newRisk: String(assessment.new_risk) as CorrectnessRisk,
+          previousLifecycle: String(assessment.previous_lifecycle) as Memory["lifecycleStatus"],
+          newLifecycle: String(assessment.new_lifecycle) as Memory["lifecycleStatus"],
+          relevance: Number(assessment.relevance_milli),
+          ...(assessment.checked_commit ? { checkedCommit: String(assessment.checked_commit) } : {}),
+          reasonCodes: JSON.parse(String(assessment.reason_codes_json)) as string[],
+          policyVersion: String(assessment.policy_version),
+          assessorVersion: String(assessment.assessor_version),
+          assessedAt: String(assessment.assessed_at),
+        },
+      } : {}),
+      ...(row.last_checked_commit ? { lastCheckedCommit: row.last_checked_commit } : {}),
+      ...(row.last_assessed_at ? { lastAssessedAt: row.last_assessed_at } : {}),
+      ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+      ...(row.restore_protected_until ? { restoreProtectedUntil: row.restore_protected_until } : {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

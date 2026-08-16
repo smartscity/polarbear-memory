@@ -35,7 +35,7 @@ test("records, reads and searches a memory through FTS5", () => {
     });
     assert.deepEqual(store.get(projectId, inserted.id)?.files, ["src/settlement.ts"]);
     assert.equal(store.search(projectId, "settlement retry", 10)[0]?.memory.id, inserted.id);
-    assert.deepEqual(store.status(projectId), { total: 1, active: 1 });
+    assert.deepEqual(store.status(projectId), { total: 1, active: 1, high_risk: 0, completed: 0 });
 
     const duplicate = store.record(projectId, {
       type: "PITFALL",
@@ -45,7 +45,7 @@ test("records, reads and searches a memory through FTS5", () => {
     });
     assert.equal(duplicate.id, inserted.id);
     assert.deepEqual(duplicate.files, ["src/settlement.ts", "test/settlement.test.ts"]);
-    assert.deepEqual(store.status(projectId), { total: 1, active: 1 });
+    assert.deepEqual(store.status(projectId), { total: 1, active: 1, high_risk: 0, completed: 0 });
   } finally {
     store.close();
   }

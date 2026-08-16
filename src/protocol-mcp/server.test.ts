@@ -72,6 +72,8 @@ test("default MCP surface exposes five bounded Agent tools", async () => {
       arguments: { type: "DECISION", summary: "FAILED is a terminal settlement state", files: ["src/settlement.ts"] },
     });
     const memory = JSON.parse(firstText(recorded)) as { id: string };
+    const expanded = await client.callTool({ name: "memory_get", arguments: { memory_id: memory.id } });
+    assert.match(firstText(expanded), /UNTRUSTED_PROJECT_MEMORY/u);
 
     const context = await client.callTool({
       name: "memory_context",

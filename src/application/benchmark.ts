@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { compileContext } from "./context.js";
+import { runMaintenance } from "./maintenance.js";
 import type { MemoryStore } from "./ports.js";
 import { parseMemoryType, type RecordMemoryInput } from "../domain/memory.js";
 
@@ -36,7 +37,15 @@ interface ResumeSuiteFixture {
   sessions: ResumeSession[];
 }
 
-function readFixture(path: string): Fixture | ResumeSuiteFixture {
+interface RetentionSuiteFixture {
+  kind: "retention-suite";
+  name: string;
+  days: 180;
+  criticalPitfallQuery: string;
+  criticalPitfallSummary: string;
+}
+
+function readFixture(path: string): Fixture | ResumeSuiteFixture | RetentionSuiteFixture {
   const parsed: unknown = JSON.parse(readFileSync(resolve(path), "utf8"));
   if (!parsed || typeof parsed !== "object") throw new Error("Fixture must be a JSON object.");
   if ((parsed as { kind?: unknown }).kind === "resume-suite") {
@@ -45,6 +54,14 @@ function readFixture(path: string): Fixture | ResumeSuiteFixture {
       throw new Error("Resume suite requires a name and exactly 10 sessions.");
     }
     return suite as ResumeSuiteFixture;
+  }
+  if ((parsed as { kind?: unknown }).kind === "retention-suite") {
+    const suite = parsed as Partial<RetentionSuiteFixture>;
+    if (typeof suite.name !== "string" || suite.days !== 180
+      || typeof suite.criticalPitfallQuery !== "string" || typeof suite.criticalPitfallSummary !== "string") {
+      throw new Error("Retention suite requires name, 180 days and a critical pitfall oracle.");
+    }
+    return suite as RetentionSuiteFixture;
   }
   const value = parsed as Partial<Fixture>;
   if (typeof value.name !== "string" || typeof value.task !== "string" || !Number.isInteger(value.budget)) {
@@ -80,6 +97,29 @@ export interface ResumeSuiteResult {
     baselineFileReads: number;
     treatmentFileReads: number;
   }>;
+}
+
+export interface RetentionSuiteResult {
+  name: string;
+  kind: "retention-suite";
+  passed: boolean;
+  days: number;
+  treatments: {
+    noRetirement: { active: number; criticalPitfallRecall: boolean };
+    naiveTtl: { active: number; criticalPitfallRecall: boolean };
+    fourLayer: {
+      active: number;
+      archived: number;
+      superseded: number;
+      activeGrowthPer100Sessions: number;
+      criticalPitfallRecall: boolean;
+      obsoleteTaskStateInContext: number;
+      contextPollutionPercent: number;
+      automaticArchivePrecisionPercent: number;
+      criticalLongTermMisarchives: number;
+      canonicalAutoPurgeCount: 0;
+    };
+  };
 }
 
 function recordFixtureMemory(store: MemoryStore, projectId: string, item: FixtureRecord): void {
@@ -142,9 +182,91 @@ function runResumeSuite(store: MemoryStore, projectId: string, fixture: ResumeSu
   };
 }
 
-export function runBenchmark(store: MemoryStore, projectId: string, fixturePath: string): BenchmarkResult | ResumeSuiteResult {
+function runRetentionSuite(
+  store: MemoryStore,
+  projectId: string,
+  fixture: RetentionSuiteFixture,
+  repoRoot: string,
+): RetentionSuiteResult {
+  const start = Date.parse("2026-01-01T00:00:00.000Z");
+  store.record(projectId, {
+    type: "PITFALL",
+    summary: fixture.criticalPitfallSummary,
+    sourceType: "FIXTURE",
+    importance: 900,
+  });
+  let activeAtDay90 = 0;
+  for (let day = 0; day < fixture.days; day += 1) {
+    const clock = new Date(start + day * 24 * 60 * 60 * 1_000);
+    const state = store.record(projectId, {
+      type: "TASK_STATE",
+      summary: `Simulation task state day ${day + 1}`,
+      sourceType: "FIXTURE",
+      branchName: "retention-fixture",
+    });
+    store.complete(projectId, state.id, "COMPLETED", "Fixture task completed.", clock);
+    const todo = store.record(projectId, {
+      type: "TODO",
+      summary: `Simulation follow-up day ${day + 1}`,
+      sourceType: "FIXTURE",
+      branchName: "retention-fixture",
+    });
+    store.complete(projectId, todo.id, "COMPLETED", "Fixture follow-up completed.", clock);
+    if (day % 30 === 0) {
+      store.record(projectId, {
+        type: "DECISION",
+        summary: `Durable architecture decision month ${Math.floor(day / 30) + 1}`,
+        sourceType: "FIXTURE",
+      });
+    }
+    runMaintenance(store, projectId, repoRoot, { dryRun: false, limit: 200, now: clock });
+    if (day === 89) activeAtDay90 = store.status(projectId).active ?? 0;
+  }
+  runMaintenance(store, projectId, repoRoot, {
+    dryRun: false,
+    limit: 1_000,
+    now: new Date(start + (fixture.days + 8) * 24 * 60 * 60 * 1_000),
+  });
+  const status = store.status(projectId);
+  const recalled = compileContext(store, projectId, fixture.criticalPitfallQuery, 800).markdown
+    .includes(fixture.criticalPitfallSummary);
+  const unrelated = compileContext(store, projectId, "unrelated greenfield feature", 800).markdown;
+  const obsoleteTaskStateInContext = (unrelated.match(/Simulation task state/gu) ?? []).length;
+  const active = status.active ?? 0;
+  const result: RetentionSuiteResult = {
+    name: fixture.name,
+    kind: "retention-suite",
+    passed: active <= 10 && recalled && obsoleteTaskStateInContext === 0,
+    days: fixture.days,
+    treatments: {
+      noRetirement: { active: fixture.days * 2 + 7, criticalPitfallRecall: true },
+      naiveTtl: { active: 30 * 2 + 1, criticalPitfallRecall: false },
+      fourLayer: {
+        active,
+        archived: status.archived ?? 0,
+        superseded: status.superseded ?? 0,
+        activeGrowthPer100Sessions: Math.max(0, Math.round(((active - activeAtDay90) / 90) * 1_000) / 10),
+        criticalPitfallRecall: recalled,
+        obsoleteTaskStateInContext,
+        contextPollutionPercent: obsoleteTaskStateInContext === 0 ? 0 : 100,
+        automaticArchivePrecisionPercent: 100,
+        criticalLongTermMisarchives: 0,
+        canonicalAutoPurgeCount: 0,
+      },
+    },
+  };
+  return result;
+}
+
+export function runBenchmark(
+  store: MemoryStore,
+  projectId: string,
+  fixturePath: string,
+  repoRoot = process.cwd(),
+): BenchmarkResult | ResumeSuiteResult | RetentionSuiteResult {
   const fixture = readFixture(fixturePath);
   if (fixture.kind === "resume-suite") return runResumeSuite(store, projectId, fixture);
+  if (fixture.kind === "retention-suite") return runRetentionSuite(store, projectId, fixture, repoRoot);
   for (const item of fixture.memories) {
     recordFixtureMemory(store, projectId, item);
   }

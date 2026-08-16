@@ -1,3 +1,5 @@
+import type { CompletionState, CorrectnessRisk, FileAnchor, LifecycleAssessment, MemoryRelation, UsageStats } from "./lifecycle.js";
+
 export const MVP_MEMORY_TYPES = [
   "DECISION",
   "PITFALL",
@@ -17,12 +19,24 @@ export interface Memory {
   content: string;
   lifecycleStatus: LifecycleStatus;
   verificationState: VerificationState;
+  correctnessRisk: CorrectnessRisk;
+  relevance: number;
+  completionState: CompletionState;
   confidence: number;
   importance: number;
   sourceType: "CLI" | "MCP" | "HOOK" | "FIXTURE";
   commitSha?: string;
   branchName?: string;
   files: string[];
+  fileAnchors: FileAnchor[];
+  relations: MemoryRelation[];
+  usage: UsageStats;
+  revisionCount: number;
+  latestAssessment?: LifecycleAssessment;
+  lastCheckedCommit?: string;
+  lastAssessedAt?: string;
+  completedAt?: string;
+  restoreProtectedUntil?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +46,8 @@ export interface RecordMemoryInput {
   summary: string;
   content?: string;
   files?: string[];
+  fileAnchors?: FileAnchor[];
+  completionState?: CompletionState;
   sourceType?: "CLI" | "MCP" | "HOOK" | "FIXTURE";
   confidence?: number;
   importance?: number;
@@ -62,5 +78,9 @@ export function validateRecordInput(input: RecordMemoryInput): void {
     if (!Number.isInteger(value) || value < 0 || value > 1000) {
       throw new Error("Confidence and importance must be integers between 0 and 1000.");
     }
+  }
+  if (input.completionState && input.completionState !== "OPEN"
+    && input.type !== "TASK_STATE" && input.type !== "TODO") {
+    throw new Error("Only TASK_STATE and TODO can be recorded as completed or cancelled.");
   }
 }

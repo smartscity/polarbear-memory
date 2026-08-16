@@ -1,6 +1,6 @@
 # Polarbear Memory
 
-Local-first persistent memory for coding agents. MVP-2 adds automatic, local handoff capture to the manual CLI and MCP resume loop: Claude Code lifecycle hooks retain only a redacted final-message envelope, then finalize reusable labeled decisions, pitfalls, task state, and next steps when the session ends.
+Local-first persistent memory for coding agents. MVP-3 adds trust and lifecycle governance to automatic local handoff: source changes produce warnings, completed short-term knowledge leaves normal Context, superseded knowledge stops competing with its replacement, and canonical Memory is never automatically purged.
 
 ## Requirements
 
@@ -55,9 +55,25 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 - `hook ingest --event Stop|SessionEnd`: bounded, silent Claude Code hook entry point. It is installed automatically by `claude install` and is not normally run by hand.
 - `spool replay`: replay locally spooled hook events after a temporary database failure.
 - Automatic extraction accepts only concise lines labeled `Decision:`, `Pitfall:`, `Task state:`, or `Next step:` (Chinese labels are also supported).
+- An explicit `[completed]` or `[cancelled]` marker on `Task state:` / `Next step:` makes the item leave normal Context immediately; completion is never guessed.
 - Repeated hook delivery is idempotent. A newer automatic `TASK_STATE` supersedes the previous active state on the same Git branch.
 - Full transcripts are never read. Credentials and home paths are redacted before raw events are persisted; raw events expire after seven days.
 - `fixtures/automatic-handoff/fixture.json` is the deterministic 10-session capture gate (10/10 currently useful; release threshold is at least 80%).
+
+## MVP-3 trust, stale detection, and retention
+
+- `maintain --dry-run [--limit N]`: preview a bounded lifecycle plan without changing Memory.
+- `maintain [--limit N]`: apply source-risk, relevance, short-term archive, raw retention, cursor, and audit updates transactionally.
+- `complete MEMORY_ID --result completed|cancelled --reason TEXT`: immediately remove a finished `TASK_STATE` or `TODO` from normal Context; it becomes eligible for reversible archive after seven days.
+- `restore MEMORY_ID --reason TEXT`: restore an archived Memory and protect it from the same automatic archive rule for 30 days.
+- `feedback MEMORY_ID --result useful|not-useful --reason TEXT`: provide an explicit bounded utility signal; selection counts alone never prove correctness.
+- `relate SOURCE_ID --type supersedes|contradicts --target TARGET_ID --reason TEXT`: preserve explicit replacement or conflict history. Contradictions become warnings rather than silent winners.
+- File-backed Memory stores a normalized local content digest. A changed/missing anchor becomes a HIGH-risk Context Warning until `verify` checks current evidence and re-anchors it.
+- Usage statistics and relevance are independent of correctness. Old `DECISION` and `PITFALL` records are not archived merely because they are old or rarely selected.
+- `benchmark fixtures/retention-180d/fixture.json` runs deterministic No Retirement, Naive TTL, and Four-Layer treatments with a controllable 180-day clock.
+- `benchmark fixtures/security/malicious-memory.json` verifies that prompt-injection text remains quoted, explicitly untrusted data.
+
+`memory_context` and session finalization run bounded maintenance on a best-effort basis. Maintenance failures never block context delivery or Claude Code shutdown. All lifecycle changes retain revision and assessment reasons; no CLI, MCP, hook, or maintenance code path exposes automatic canonical purge.
 
 Claude Code project MCP servers require a one-time user approval. The generated configuration launches `polarbear-memory` from `PATH`; source checkouts should run `npm link` first or pass `claude install --command /absolute/path/to/a/release-launcher`.
 
