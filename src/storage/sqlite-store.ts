@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Memory, MemorySearchResult, MemoryType, RecordMemoryInput, VerificationState } from "../domain/memory.js";
 import type {
   CompletionState,
@@ -202,6 +204,21 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
 END;
 `;
 
+export const CURRENT_SCHEMA_VERSION = 4;
+
+function quoteSqliteLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function existingSchemaVersion(db: DatabaseSync): { hasData: boolean; version: number } {
+  const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('memories', 'schema_migrations')").all()
+    as Array<{ name: string }>;
+  const hasData = tables.some((row) => row.name === "memories");
+  if (!tables.some((row) => row.name === "schema_migrations")) return { hasData, version: 0 };
+  const row = db.prepare("SELECT coalesce(max(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  return { hasData, version: row.version };
+}
+
 function ftsQuery(input: string): string {
   const terms = input.normalize("NFKC").match(/[\p{L}\p{N}_./:-]+/gu)?.slice(0, 20) ?? [];
   return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
@@ -218,6 +235,18 @@ export class SqliteMemoryStore implements MemoryStore {
       enableDoubleQuotedStringLiterals: false,
       timeout: busyTimeoutMs,
     });
+    const existing = existingSchemaVersion(this.#db);
+    if (existing.version > CURRENT_SCHEMA_VERSION) {
+      this.#db.close();
+      throw new Error(`Database schema ${existing.version} is newer than this Engine supports (${CURRENT_SCHEMA_VERSION}). Upgrade Polarbear Memory before writing.`);
+    }
+    if (databasePath !== ":memory:" && existing.hasData && existing.version < CURRENT_SCHEMA_VERSION) {
+      const migrationBackupDirectory = join(dirname(databasePath), "backups", "migrations");
+      mkdirSync(migrationBackupDirectory, { recursive: true, mode: 0o700 });
+      const backupPath = join(migrationBackupDirectory, `schema-${existing.version}-to-${CURRENT_SCHEMA_VERSION}-${Date.now()}.db`);
+      if (existsSync(backupPath)) throw new Error("Migration backup target already exists.");
+      this.#db.exec(`VACUUM INTO ${quoteSqliteLiteral(backupPath)}`);
+    }
     this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
     this.#db.exec(SCHEMA);
     this.#migrateMemorySourceTypes();
@@ -241,7 +270,7 @@ export class SqliteMemoryStore implements MemoryStore {
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
     this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
-    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?)").run(migrationTime);
+    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
   }
 
   initializeProject(project: { id: string; name: string }): void {
@@ -415,6 +444,53 @@ export class SqliteMemoryStore implements MemoryStore {
         relevance_milli DESC, importance_milli DESC, updated_at DESC, id ASC LIMIT ?
     `).all(projectId, limit) as unknown as MemoryRow[];
     return rows.map((row, index) => ({ memory: this.#toMemory(row), rank: index + 1 }));
+  }
+
+  list(
+    projectId: string,
+    options: { query?: string; status?: Memory["lifecycleStatus"]; type?: MemoryType; limit: number; offset: number },
+  ): Memory[] {
+    const limit = Math.max(1, Math.min(options.limit, 100));
+    const offset = Math.max(0, options.offset);
+    const query = options.query?.trim();
+    if (query) {
+      const match = ftsQuery(query);
+      if (!match) return [];
+      const rows = this.#db.prepare(`
+        SELECT m.* FROM memory_fts
+        JOIN memories m ON m.row_id = memory_fts.rowid
+        WHERE memory_fts MATCH ? AND m.project_id = ?
+          AND (? IS NULL OR m.lifecycle_status = ?)
+          AND (? IS NULL OR m.type = ?)
+        ORDER BY bm25(memory_fts, 8.0, 2.0, 1.0), m.updated_at DESC, m.id ASC
+        LIMIT ? OFFSET ?
+      `).all(
+        match,
+        projectId,
+        options.status ?? null,
+        options.status ?? null,
+        options.type ?? null,
+        options.type ?? null,
+        limit,
+        offset,
+      ) as unknown as MemoryRow[];
+      return rows.map((row) => this.#toMemory(row));
+    }
+    const rows = this.#db.prepare(`
+      SELECT * FROM memories WHERE project_id = ?
+        AND (? IS NULL OR lifecycle_status = ?)
+        AND (? IS NULL OR type = ?)
+      ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?
+    `).all(
+      projectId,
+      options.status ?? null,
+      options.status ?? null,
+      options.type ?? null,
+      options.type ?? null,
+      limit,
+      offset,
+    ) as unknown as MemoryRow[];
+    return rows.map((row) => this.#toMemory(row));
   }
 
   verify(

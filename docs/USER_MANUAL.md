@@ -648,50 +648,48 @@ Promote 前必须预览将写入 Git 的内容。Markdown 可以由人类编辑�
 
 Polarbear Desktop 不是使用 Memory 的前置条件，而是完整管理控制面。
 
-打开一个已经初始化的项目后，侧边栏出现 Memory：
+v0.0.5 的可运行入口是在打开 Git 工作区后点击侧边栏的“记忆 / Memory”按钮。首次请求时 Desktop 的 Rust 后端会连接本机 Memory Engine；如果 Engine 未运行，会尝试执行 `polarbear-memory service run`。源码开发时若命令不在 `PATH`，设置 `POLARBEAR_MEMORY_COMMAND` 为构建后的 launcher 路径。
+
+打开一个已经初始化的项目后，首版面板提供：
 
 ```text
 Memory
-├── Overview
-├── Timeline
-├── Decisions
-├── Architecture
-├── Pitfalls
-├── Active Tasks
-├── Potentially Stale
-├── Context Packs
-└── Settings
+├── Overview counts
+├── Timeline / Search / lifecycle filters
+├── Detail / Verify / Dispute / Archive / Restore
+├── Context Pack Explain
+└── Promote preview / Confirm
 ```
 
 ### 17.1 Overview
 
-显示：
+v0.0.5 显示：
 
 - Memory 总量和类型分布。
-- 候选、已验证、potentially stale 数量。
-- 活跃任务和上次 capture。
-- Context Pack token 使用。
-- Engine、数据库和 Agent adapter 健康状态。
+- 活跃与待复核数量。
+- 按更新时间倒序的 Timeline。
+- 搜索和 lifecycle filter。
+
+类型分布、上次 capture、adapter/storage health 是后续 Overview 增量，不应由 Desktop 直接查询 SQLite 补齐。
 
 ### 17.2 Memory Detail
 
-可以：
+v0.0.5 可以：
 
-- 查看和修改内容。
-- 查看来源、commit、文件、symbol 和测试 evidence。
-- 查看 revision 和关系图。
-- verify、dispute、supersede、archive。
-- 发起 purge。
+- 查看惰性纯文本内容和关联文件。
+- verify、dispute、archive、restore。
 - Promote to Markdown。
+
+编辑正文、完整 evidence/revision/关系图、supersede 编辑器和 purge approval 属于后续 capability；当前 UI 不提供物理删除。
 
 ### 17.3 Context Pack Explain
 
-用户可以打开一次 Context Pack，查看：
+用户输入当前任务后可以查看：
 
-- 为什么选中某条 Memory。
-- 为什么某条 Memory 被降权或排除。
-- 哪些内容因为 token budget 被省略。
-- 是否使用 Git 或可选 CodeGraph provider。
+- 被选中的 Memory ID 和 warning Memory ID。
+- 最终惰性 Markdown source、估算 token 和选中数量。
+
+逐条 ranking reason、被预算排除项和 Provider 贡献解释是下一版 explain DTO 的增量。
 
 ### 17.4 Desktop 与 Engine 的关系
 
@@ -971,7 +969,7 @@ polarbear-memory uninstall --keep-data
 
 ### Desktop 能完全管理 Memory 吗？
 
-能。Desktop 通过完整 Admin API 管理 Memory、状态、索引、配置、备份和删除，但不直接执行 SQL。
+架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.0.5 已覆盖浏览、搜索、验证/争议、可恢复归档/恢复、Context Explain 和 Promote；索引、配置、备份恢复与 purge approval 会作为后续 versioned capability 加入。
 
 ### 用户需要安装 Node.js 吗？
 

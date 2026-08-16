@@ -1,6 +1,6 @@
 # Polarbear Memory
 
-Local-first persistent memory for coding agents. MVP-3 adds trust and lifecycle governance to automatic local handoff: source changes produce warnings, completed short-term knowledge leaves normal Context, superseded knowledge stops competing with its replacement, and canonical Memory is never automatically purged.
+Local-first persistent memory for coding agents. MVP-4 adds a user-scoped local Admin API and the optional Polarbear Desktop control plane without giving Desktop access to `memory.db`.
 
 ## Requirements
 
@@ -75,8 +75,17 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 
 `memory_context` and session finalization run bounded maintenance on a best-effort basis. Maintenance failures never block context delivery or Claude Code shutdown. All lifecycle changes retain revision and assessment reasons; no CLI, MCP, hook, or maintenance code path exposes automatic canonical purge.
 
+## MVP-4 Polarbear Desktop control plane
+
+- `service run`: starts Admin API v1 on a current-user Unix-domain socket. It never listens on TCP; the service directory is `0700`, and the socket/token are `0600`.
+- The versioned API supports capability negotiation, project overview, timeline/search/detail, verify/dispute, reversible archive/restore, Context Pack explanation, and two-phase Promote to Markdown.
+- Promote first returns inert source text, target path, and SHA-256. The confirmed write must present the same SHA-256 and uses exclusive creation, so it neither silently changes after preview nor overwrites an existing file.
+- Polarbear Desktop holds no database code or token in its webview. Its Rust backend validates current-user ownership and permissions, then proxies an allowlisted, size-bounded request.
+- The Memory panel renders content with React text nodes and `<pre>` only: no HTML execution, remote image loading, fenced-code execution, or PlantUML rendering.
+- macOS and Linux are the runnable MVP-4 transport target. Windows named-pipe support remains a post-MVP portability item.
+
 Claude Code project MCP servers require a one-time user approval. The generated configuration launches `polarbear-memory` from `PATH`; source checkouts should run `npm link` first or pass `claude install --command /absolute/path/to/a/release-launcher`.
 
-Runtime code uses only the official MCP stdio server SDK and Zod in addition to Node built-ins. The tested runtime path performs no network requests, including diagram or rendering services. Project repositories contain configuration and Claude integration files only; `memory.db` is owned by the Memory Engine and stored in the operating system's user-data directory.
+Runtime code uses only the official MCP stdio server SDK and Zod in addition to Node built-ins. `node:net` is isolated to the audited Unix-domain-socket module; HTTP, HTTPS, TLS, DNS and `fetch` remain forbidden in the Engine release. Project repositories contain configuration, integration files, and explicitly promoted Markdown only; `memory.db` is owned by the Memory Engine and stored in the operating system's user-data directory.
 
 See [PRD](docs/PRD.md), [TRD](docs/TRD.md), [User Manual](docs/USER_MANUAL.md), and [Memory Retention Validation](docs/MEMORY_RETENTION_VALIDATION.md).

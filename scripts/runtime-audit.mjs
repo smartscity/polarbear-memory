@@ -30,8 +30,15 @@ if (process.argv.includes("--scan-dist")) {
   for (const file of filesUnder(dist)) {
     if (extname(file) !== ".js" || file.endsWith(".test.js") || file.includes(`${join("dist", "test")}`)) continue;
     const source = readFileSync(file, "utf8");
-    if (/node:(?:http|https|net|tls|dns)/u.test(source) || /\bfetch\s*\(/u.test(source)) {
+    const isLocalSocketModule = file.includes(`${join("dist", "protocol-local")}`);
+    const forbiddenImport = isLocalSocketModule
+      ? /node:(?:http|https|tls|dns)/u
+      : /node:(?:http|https|net|tls|dns)/u;
+    if (forbiddenImport.test(source) || /\bfetch\s*\(/u.test(source)) {
       failures.push(`network-capable import or fetch in runtime output: ${file}`);
+    }
+    if (isLocalSocketModule && /\.listen\s*\(\s*(?:\d|\{)/u.test(source)) {
+      failures.push(`TCP-style listen in local socket module: ${file}`);
     }
   }
 }

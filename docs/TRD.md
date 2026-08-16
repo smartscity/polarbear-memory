@@ -1015,7 +1015,9 @@ storage.index_rebuild
 storage.migration_status
 ```
 
-API 采用 length-prefixed JSON RPC 或经过审计的本地 IPC 协议；不因为 UI 方便就监听未鉴权 localhost HTTP。
+MVP-4 已选择经过审计的 UTF-8 JSON line IPC：每条连接只接受一个以换行结束的 JSON object，请求和响应均限制为 1 MiB；JSON 字符串内换行必须转义。它运行在 user-scoped Unix-domain socket 上，不监听 localhost TCP。服务目录权限为 `0700`，socket 和随机 token 文件为 `0600`；请求使用 constant-time token comparison。Windows named pipe / 当前 SID 绑定留作 MVP-4 后的可移植性增量。
+
+MVP-4 的首批稳定 capability 为：`projects.status`、`memories.list/get/verify/archive/restore/relate`、`contexts.explain`、`knowledge.promote_preview/promote`。列表/详情仅返回 DTO，不返回数据库路径或表结构。Promote 使用 preview SHA-256 进行二阶段确认并以 exclusive-create 写入；purge、migration、backup restore 和 settings mutation 仍是后续 Admin capability，不通过“Desktop 直读数据库”临时补齐。
 
 涉及 purge、restore、migration 等高风险操作时，Desktop 发起请求并展示影响范围，由用户确认；实际事务、备份验证和审计记录仍由 Engine 完成。
 
@@ -1167,6 +1169,7 @@ MIT OR Apache-2.0
 | Zod | MCP/domain boundary schema validation | MIT | 仅边界验证 | schema size/depth limit；不把 parse 当授权 |
 | `node:util.parseArgs` | MVP CLI parsing | Node.js 内置模块 | MVP-0 首选 | CLI 复杂度证明不足时再评估 Commander |
 | `node:crypto` | UUID/hash | Node.js 内置模块 | `randomUUID` 与 digest | ID 不作为授权凭据；固定 canonical encoding |
+| Unix domain socket + Rust `libc` | MVP-4 user-only Desktop proxy ownership check | Node/Rust stdlib；`libc` 为 MIT OR Apache-2.0 | 仅本地 IPC；无 TCP | `0700/0600`、effective UID 校验、method allowlist、1 MiB frame limit |
 | `node:fs/path/child_process` | 文件、路径、Git argv | Node.js 内置模块 | 受 policy wrapper 约束 | 无 shell、path containment、timeout/output limit |
 | TOML parser（待选型） | `.polarbear/config.toml` | 必须满足 allowlist | 只选零/少依赖实现 | 用官方 TOML fixtures；选型时单独记录 license/maintenance ADR |
 | picomatch 或等价实现（待验证） | include/exclude path | 预期 MIT | 非用户 regex 的 glob policy | pin；复杂度/长度限制；引入前复核实际版本 |
@@ -1609,6 +1612,8 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 - Context Pack explain。
 - Desktop 与 Engine capability negotiation。
 
+实现状态（v0.0.5）：以上可运行工程闭环已完成；Timeline 由按 `updated_at` 倒序且可筛选/搜索的列表提供，Forget 对应可恢复的 archive。真实用户是否持续使用 Viewer、纠错率是否提高、durable knowledge 产出是否增加，仍必须通过产品试用数据验证，不能由自动化测试替代。
+
 可运行演示：
 
 ```text
@@ -1765,7 +1770,7 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 - [ ] MVP-0 的 config unknown-field 策略。
 - [ ] Token estimator 是否需要具体 tokenizer。
 - [ ] `synchronous` 最终级别与备份频率。
-- [ ] MVP-4 local RPC 选择 length-prefixed JSON 还是其他协议。
+- [x] MVP-4 local RPC 选择有界 JSON line over user-scoped Unix-domain socket；不监听 TCP。
 - [ ] v0.2 首批 tree-sitter 语言清单。
 - [ ] CodeGraph adapter 的具体协议与许可证结论。
 

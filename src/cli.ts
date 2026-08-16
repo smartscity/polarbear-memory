@@ -12,7 +12,7 @@ import { captureFileAnchors } from "./platform/anchors.js";
 import { loadProject, planProject, writeProjectConfig } from "./platform/project.js";
 import { SqliteMemoryStore } from "./storage/sqlite-store.js";
 
-const VERSION = "0.0.4";
+const VERSION = "0.0.5";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -33,6 +33,7 @@ Usage:
   polarbear-memory status
   polarbear-memory doctor
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
+  polarbear-memory service run
   polarbear-memory claude install [--dry-run] [--command EXECUTABLE]
   polarbear-memory claude restore
   polarbear-memory hook ingest --event Stop|SessionEnd
@@ -472,6 +473,11 @@ async function main(): Promise<void> {
     case "backup": return createBackup(cwd);
     case "benchmark": return benchmark(cwd, args);
     case "mcp": return mcp(cwd, args);
+    case "service": {
+      if (args.length !== 1 || args[0] !== "run") throw new Error("service requires `run`.");
+      const { serveAdminApi } = await import("./protocol-local/server.js");
+      return serveAdminApi();
+    }
     case "claude": return claude(cwd, args);
     case "hook": return hook(cwd, args);
     case "spool": return spool(cwd, args);

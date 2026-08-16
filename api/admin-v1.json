@@ -1,0 +1,26 @@
+{
+  "title": "Polarbear Memory Local Admin API",
+  "version": "1.0",
+  "engineVersion": "0.0.5",
+  "transport": "user-scoped-unix-domain-socket",
+  "maxFrameBytes": 1048576,
+  "capabilities": [
+    "projects.status",
+    "memories.list",
+    "memories.get",
+    "memories.verify",
+    "memories.archive",
+    "memories.restore",
+    "memories.relate",
+    "contexts.explain",
+    "knowledge.promote_preview",
+    "knowledge.promote"
+  ],
+  "security": {
+    "tcp": false,
+    "tokenFileMode": "0600",
+    "socketMode": "0600",
+    "directoryMode": "0700",
+    "databasePathExposed": false
+  }
+}

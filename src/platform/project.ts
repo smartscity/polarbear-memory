@@ -15,7 +15,7 @@ export interface ProjectBinding {
   databasePath: string;
 }
 
-function defaultDataRoot(): string {
+export function defaultDataRoot(): string {
   const override = process.env.POLARBEAR_MEMORY_DATA_DIR;
   if (override) return override;
   if (platform() === "darwin") return join(homedir(), "Library", "Application Support", "Polarbear Memory");

@@ -1,4 +1,4 @@
-import type { Memory, MemorySearchResult, RecordMemoryInput, VerificationState } from "../domain/memory.js";
+import type { LifecycleStatus, Memory, MemorySearchResult, MemoryType, RecordMemoryInput, VerificationState } from "../domain/memory.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 import type { CompletionState, FileAnchor, MaintenanceAction, MemoryRelationType } from "../domain/lifecycle.js";
 
@@ -8,6 +8,7 @@ export interface MemoryStore {
   get(projectId: string, memoryId: string): Memory | undefined;
   search(projectId: string, query: string, limit: number): MemorySearchResult[];
   recent(projectId: string, limit: number): MemorySearchResult[];
+  list(projectId: string, options: { query?: string; status?: LifecycleStatus; type?: MemoryType; limit: number; offset: number }): Memory[];
   verify(projectId: string, memoryId: string, state: VerificationState, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP", evidence?: { anchors?: FileAnchor[]; checkedCommit?: string }): Memory;
   archive(projectId: string, memoryId: string, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
   restore(projectId: string, memoryId: string, reason: string): Memory;
