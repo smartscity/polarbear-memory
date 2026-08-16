@@ -4,20 +4,23 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-function run(command: string, args: string[], cwd: string, dataDir?: string) {
+function run(command: string, args: string[], cwd: string, dataDir?: string, input?: string) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     shell: false,
-    timeout: 5_000,
+    timeout: 30_000,
+    ...(input === undefined ? {} : { input }),
     env: dataDir ? { ...process.env, POLARBEAR_MEMORY_DATA_DIR: dataDir } : process.env,
   });
   assert.equal(result.status, 0, `command failed: ${command} ${args.join(" ")}\n${result.stderr}`);
   return result;
 }
 
-test("CLI completes init, record, search, context, backup and benchmark", () => {
+test("CLI completes MVP-0 flow and real MCP stdio handshake", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-cli-"));
   const repository = join(temporary, "repo");
   const dataDir = join(temporary, "data");
@@ -49,6 +52,60 @@ test("CLI completes init, record, search, context, backup and benchmark", () => 
 
     const benchmark = run(process.execPath, offline(["benchmark", fixture]), repository, dataDir);
     assert.match(benchmark.stdout, /"passed": true/);
+    const resumeSuite = run(process.execPath, offline(["benchmark", resolve("fixtures/resume-10/fixture.json")]), repository, dataDir);
+    assert.match(resumeSuite.stdout, /"validPacks": 10/);
+    assert.match(resumeSuite.stdout, /"medianFileReadReductionPercent": 40/);
+
+    const claudeDryRun = run(process.execPath, offline(["claude", "install", "--dry-run"]), repository, dataDir);
+    assert.match(claudeDryRun.stdout, /no files were changed/);
+    run(process.execPath, offline(["claude", "install"]), repository, dataDir);
+    const hookStop = run(process.execPath, offline(["hook", "ingest", "--event", "Stop"]), repository, dataDir, JSON.stringify({
+      hook_event_name: "Stop",
+      session_id: "cli-e2e-session",
+      cwd: repository,
+      last_assistant_message: "Decision: Use the automatic hook decision path.",
+    }));
+    assert.equal(hookStop.stdout, "");
+    assert.equal(hookStop.stderr, "");
+    const hookEnd = run(process.execPath, offline(["hook", "ingest", "--event", "SessionEnd"]), repository, dataDir, JSON.stringify({
+      hook_event_name: "SessionEnd",
+      session_id: "cli-e2e-session",
+      cwd: repository,
+      reason: "other",
+    }));
+    assert.equal(hookEnd.stdout, "");
+    assert.equal(hookEnd.stderr, "");
+    assert.match(run(process.execPath, offline(["search", "automatic decision"]), repository, dataDir).stdout, /automatic hook decision/);
+    const doctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
+    assert.match(doctor.stdout, /Claude MCP\s+OK/);
+
+    const inheritedEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    );
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [...offline(["mcp", "--stdio", "--project-root", repository])],
+      cwd: repository,
+      env: { ...inheritedEnvironment, POLARBEAR_MEMORY_DATA_DIR: dataDir },
+      stderr: "pipe",
+    });
+    const stderr: Buffer[] = [];
+    transport.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const client = new Client({ name: "stdio-e2e", version: "1.0.0" });
+    try {
+      await client.connect(transport);
+      assert.equal((await client.listTools()).tools.length, 5);
+      const contextOverStdio = await client.callTool({
+        name: "memory_context",
+        arguments: { task: "settlement retry", budget: 400 },
+      });
+      assert.equal(contextOverStdio.isError, undefined);
+    } finally {
+      await client.close();
+    }
+    assert.equal(Buffer.concat(stderr).toString("utf8"), "");
+
+    run(process.execPath, offline(["claude", "restore"]), repository, dataDir);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

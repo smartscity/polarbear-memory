@@ -1,0 +1,96 @@
+{
+  "kind": "resume-suite",
+  "name": "agent-resume-10",
+  "sessions": [
+    {
+      "id": "settlement-terminal",
+      "memory": { "type": "DECISION", "summary": "FAILED is a terminal settlement state", "content": "Create a new recovery attempt instead of mutating FAILED.", "files": ["src/settlement/state.ts"] },
+      "task": "continue FAILED settlement recovery",
+      "expected": "FAILED is a terminal settlement state",
+      "budget": 400,
+      "baselineFiles": ["src/settlement/state.ts", "src/settlement/recovery.ts", "test/settlement.test.ts", "docs/settlement.md", "src/settlement/index.ts"],
+      "avoidedFiles": ["src/settlement/state.ts", "docs/settlement.md"]
+    },
+    {
+      "id": "webhook-idempotency",
+      "memory": { "type": "PITFALL", "summary": "Webhook idempotency uses provider event ID", "content": "Payload hashes changed after harmless field ordering differences.", "files": ["src/webhook/idempotency.ts"] },
+      "task": "resume webhook idempotency event ID work",
+      "expected": "Webhook idempotency uses provider event ID",
+      "budget": 400,
+      "baselineFiles": ["src/webhook/idempotency.ts", "src/webhook/handler.ts", "test/webhook.test.ts", "docs/webhook.md", "src/db/events.ts"],
+      "avoidedFiles": ["src/webhook/idempotency.ts", "docs/webhook.md"]
+    },
+    {
+      "id": "cache-stampede",
+      "memory": { "type": "DECISION", "summary": "Cache stampede protection uses single-flight", "content": "Distributed locking was unnecessary for this process-local cache.", "files": ["src/cache/single-flight.ts"] },
+      "task": "continue cache stampede single-flight implementation",
+      "expected": "Cache stampede protection uses single-flight",
+      "budget": 400,
+      "baselineFiles": ["src/cache/index.ts", "src/cache/single-flight.ts", "src/cache/redis.ts", "test/cache.test.ts", "docs/cache.md"],
+      "avoidedFiles": ["src/cache/redis.ts", "docs/cache.md"]
+    },
+    {
+      "id": "auth-scope",
+      "memory": { "type": "PITFALL", "summary": "Reports API returns 403 without reports:read scope", "content": "Authentication succeeds, but authorization rejects the request.", "files": ["src/auth/scopes.ts"] },
+      "task": "debug reports API 403 scope",
+      "expected": "reports:read scope",
+      "budget": 400,
+      "baselineFiles": ["src/auth/scopes.ts", "src/auth/token.ts", "src/reports/api.ts", "test/reports.test.ts", "docs/auth.md"],
+      "avoidedFiles": ["src/auth/token.ts", "docs/auth.md"]
+    },
+    {
+      "id": "migration-compat",
+      "memory": { "type": "TODO", "summary": "Add backward compatibility test for migration 17", "content": "Open the v16 fixture with the v17 migrator and verify rollback.", "files": ["test/migrations/v17.test.ts"] },
+      "task": "continue migration 17 compatibility test",
+      "expected": "backward compatibility test for migration 17",
+      "budget": 400,
+      "baselineFiles": ["migrations/17.sql", "migrations/16.sql", "test/migrations/v17.test.ts", "src/db/migrate.ts", "docs/database.md"],
+      "avoidedFiles": ["migrations/16.sql", "docs/database.md"]
+    },
+    {
+      "id": "currency-rounding",
+      "memory": { "type": "DECISION", "summary": "Redemption rounds currency DOWN at scale 3", "content": "Final display rounding happens separately at scale 2.", "files": ["src/money/redemption.ts"] },
+      "task": "resume redemption currency rounding",
+      "expected": "rounds currency DOWN at scale 3",
+      "budget": 400,
+      "baselineFiles": ["src/money/redemption.ts", "src/money/format.ts", "src/money/types.ts", "test/redemption.test.ts", "docs/money.md"],
+      "avoidedFiles": ["src/money/types.ts", "docs/money.md"]
+    },
+    {
+      "id": "event-ordering",
+      "memory": { "type": "PITFALL", "summary": "Account events must be ordered by sequence number", "content": "Timestamps collide under batch ingestion and cannot define order.", "files": ["src/events/projector.ts"] },
+      "task": "fix account event ordering sequence number",
+      "expected": "ordered by sequence number",
+      "budget": 400,
+      "baselineFiles": ["src/events/projector.ts", "src/events/schema.ts", "src/events/consumer.ts", "test/events.test.ts", "docs/events.md"],
+      "avoidedFiles": ["src/events/schema.ts", "docs/events.md"]
+    },
+    {
+      "id": "dead-letter",
+      "memory": { "type": "TASK_STATE", "summary": "Dead-letter retry endpoint is complete; authorization test remains", "content": "Implementation is in the admin router. Next action is the denied-role test.", "files": ["src/admin/dead-letter.ts"] },
+      "task": "continue dead-letter retry authorization test",
+      "expected": "authorization test remains",
+      "budget": 400,
+      "baselineFiles": ["src/admin/dead-letter.ts", "src/admin/router.ts", "src/auth/roles.ts", "test/admin.test.ts", "docs/admin.md"],
+      "avoidedFiles": ["src/admin/router.ts", "docs/admin.md"]
+    },
+    {
+      "id": "feature-flag",
+      "memory": { "type": "TODO", "summary": "Remove checkout-v2 flag after the August rollout", "content": "Delete both evaluation branches after rollout verification.", "files": ["src/checkout/flags.ts"] },
+      "task": "resume checkout-v2 feature flag cleanup",
+      "expected": "Remove checkout-v2 flag",
+      "budget": 400,
+      "baselineFiles": ["src/checkout/flags.ts", "src/checkout/service.ts", "src/config/flags.ts", "test/checkout.test.ts", "docs/rollout.md"],
+      "avoidedFiles": ["src/config/flags.ts", "docs/rollout.md"]
+    },
+    {
+      "id": "timezone-storage",
+      "memory": { "type": "DECISION", "summary": "Persist scheduling timestamps as UTC instants", "content": "Convert to the account timezone only at presentation boundaries.", "files": ["src/schedule/time.ts"] },
+      "task": "continue scheduling UTC timezone persistence",
+      "expected": "UTC instants",
+      "budget": 400,
+      "baselineFiles": ["src/schedule/time.ts", "src/schedule/model.ts", "src/account/timezone.ts", "test/schedule.test.ts", "docs/time.md"],
+      "avoidedFiles": ["src/account/timezone.ts", "docs/time.md"]
+    }
+  ]
+}

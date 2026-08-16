@@ -1,4 +1,5 @@
-import type { Memory, MemorySearchResult, RecordMemoryInput } from "../domain/memory.js";
+import type { Memory, MemorySearchResult, RecordMemoryInput, VerificationState } from "../domain/memory.js";
+import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 
 export interface MemoryStore {
   initializeProject(project: { id: string; name: string }): void;
@@ -6,6 +7,13 @@ export interface MemoryStore {
   get(projectId: string, memoryId: string): Memory | undefined;
   search(projectId: string, query: string, limit: number): MemorySearchResult[];
   recent(projectId: string, limit: number): MemorySearchResult[];
+  verify(projectId: string, memoryId: string, state: VerificationState, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
+  archive(projectId: string, memoryId: string, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
+  ingestRawEvent(event: EventEnvelope): boolean;
+  unprocessedRawEvents(projectId: string, sessionRefHash: string): StoredRawEvent[];
+  pendingEndedSessions(projectId: string): string[];
+  markRawEventProcessed(projectId: string, eventId: string, processedAt: string): void;
+  deleteExpiredRawEvents(projectId: string, now: string): number;
   status(projectId: string): Record<string, number>;
   rebuildSearchIndex(): void;
   backup(destination: string): Promise<number>;

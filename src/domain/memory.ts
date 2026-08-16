@@ -19,7 +19,7 @@ export interface Memory {
   verificationState: VerificationState;
   confidence: number;
   importance: number;
-  sourceType: "CLI" | "FIXTURE";
+  sourceType: "CLI" | "MCP" | "HOOK" | "FIXTURE";
   commitSha?: string;
   branchName?: string;
   files: string[];
@@ -32,7 +32,7 @@ export interface RecordMemoryInput {
   summary: string;
   content?: string;
   files?: string[];
-  sourceType?: "CLI" | "FIXTURE";
+  sourceType?: "CLI" | "MCP" | "HOOK" | "FIXTURE";
   confidence?: number;
   importance?: number;
   commitSha?: string;

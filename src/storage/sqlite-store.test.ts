@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { compileContext } from "../application/context.js";
 import { SqliteMemoryStore } from "./sqlite-store.js";
 
@@ -97,5 +99,54 @@ test("schema initialization, backup and FTS rebuild are reliable", async () => {
     assert.equal(restored.search(projectId, "SQLite", 10).length, 1);
   } finally {
     restored.close();
+  }
+});
+
+test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-legacy-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const projectId = "33333333-3333-4333-8333-333333333333";
+  const now = "2026-01-01T00:00:00.000Z";
+  const legacy = new DatabaseSync(path);
+  legacy.exec(`
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY, display_name TEXT NOT NULL, created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL, schema_version INTEGER NOT NULL
+    ) STRICT;
+    CREATE TABLE memories (
+      row_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('DECISION','PITFALL','TASK_STATE','TODO')),
+      summary TEXT NOT NULL CHECK (length(summary) > 0), content TEXT NOT NULL CHECK (length(content) > 0),
+      lifecycle_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (lifecycle_status IN ('ACTIVE','ARCHIVED','SUPERSEDED','REJECTED')),
+      verification_state TEXT NOT NULL DEFAULT 'UNVERIFIED' CHECK (verification_state IN ('UNVERIFIED','VERIFIED','DISPUTED')),
+      confidence_milli INTEGER NOT NULL CHECK (confidence_milli BETWEEN 0 AND 1000),
+      importance_milli INTEGER NOT NULL CHECK (importance_milli BETWEEN 0 AND 1000),
+      source_type TEXT NOT NULL CHECK (source_type IN ('CLI','FIXTURE')),
+      commit_sha TEXT, branch_name TEXT, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    ) STRICT;
+  `);
+  legacy.prepare("INSERT INTO projects VALUES (?, 'legacy', ?, ?, 1)").run(projectId, now, now);
+  const summary = "Preserve this legacy decision";
+  const hash = createHash("sha256").update(`DECISION\0${summary}\0${summary}`).digest("hex");
+  legacy.prepare(`
+    INSERT INTO memories(
+      id, project_id, type, summary, content, confidence_milli, importance_milli,
+      source_type, content_hash, created_at, updated_at
+    ) VALUES ('legacy-memory', ?, 'DECISION', ?, ?, 700, 500, 'CLI', ?, ?, ?)
+  `).run(projectId, summary, summary, hash, now, now);
+  legacy.close();
+
+  const migrated = new SqliteMemoryStore(path);
+  try {
+    migrated.initializeProject({ id: projectId, name: "legacy" });
+    migrated.record(projectId, { type: "TODO", summary: "Captured by hook", sourceType: "HOOK" });
+    assert.equal(migrated.search(projectId, "legacy decision", 10)
+      .some(({ memory }) => memory.id === "legacy-memory"), true);
+    assert.equal(migrated.search(projectId, "Captured hook", 10)
+      .some(({ memory }) => memory.sourceType === "HOOK"), true);
+  } finally {
+    migrated.close();
   }
 });

@@ -1,0 +1,65 @@
+{
+  "name": "mvp2-automatic-handoff-10",
+  "sessions": [
+    {
+      "id": "session-01",
+      "lastAssistantMessage": "Implemented the retry guard.\nDecision: Keep settlement retries outside the database transaction.",
+      "expectedType": "DECISION",
+      "expectedSummary": "Keep settlement retries outside the database transaction."
+    },
+    {
+      "id": "session-02",
+      "lastAssistantMessage": "Tests pass.\nPitfall: SQLite busy errors recur when a hook waits on the writer lock.",
+      "expectedType": "PITFALL",
+      "expectedSummary": "SQLite busy errors recur when a hook waits on the writer lock."
+    },
+    {
+      "id": "session-03",
+      "lastAssistantMessage": "Task state: Recovery endpoint is implemented in `src/recovery.ts`.",
+      "expectedType": "TASK_STATE",
+      "expectedSummary": "Recovery endpoint is implemented in `src/recovery.ts`."
+    },
+    {
+      "id": "session-04",
+      "lastAssistantMessage": "Next step: Add authorization coverage in `test/recovery.test.ts`.",
+      "expectedType": "TODO",
+      "expectedSummary": "Add authorization coverage in `test/recovery.test.ts`."
+    },
+    {
+      "id": "session-05",
+      "lastAssistantMessage": "决定：MCP 标准输出只允许协议帧。",
+      "expectedType": "DECISION",
+      "expectedSummary": "MCP 标准输出只允许协议帧。"
+    },
+    {
+      "id": "session-06",
+      "lastAssistantMessage": "踩坑：不要读取完整 transcript 来生成 handoff。",
+      "expectedType": "PITFALL",
+      "expectedSummary": "不要读取完整 transcript 来生成 handoff。"
+    },
+    {
+      "id": "session-07",
+      "lastAssistantMessage": "当前状态：Hook 已支持本地 spool 和幂等重放。",
+      "expectedType": "TASK_STATE",
+      "expectedSummary": "Hook 已支持本地 spool 和幂等重放。"
+    },
+    {
+      "id": "session-08",
+      "lastAssistantMessage": "下一步：验证过期 raw event 会在七天后清理。",
+      "expectedType": "TODO",
+      "expectedSummary": "验证过期 raw event 会在七天后清理。"
+    },
+    {
+      "id": "session-09",
+      "lastAssistantMessage": "Finished the feature and reviewed the diff.\nDecision: Raw hook events expire but canonical memories remain recoverable.",
+      "expectedType": "DECISION",
+      "expectedSummary": "Raw hook events expire but canonical memories remain recoverable."
+    },
+    {
+      "id": "session-10",
+      "lastAssistantMessage": "All checks are green.\nNext step: Measure automatic handoff quality on real projects.",
+      "expectedType": "TODO",
+      "expectedSummary": "Measure automatic handoff quality on real projects."
+    }
+  ]
+}

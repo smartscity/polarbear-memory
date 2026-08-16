@@ -4,12 +4,13 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { compileContext } from "./application/context.js";
 import { runBenchmark } from "./application/benchmark.js";
+import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration } from "./adapter-claude-code/integration.js";
 import { parseMemoryType } from "./domain/memory.js";
 import { discoverGitContext, normalizeRepoFile } from "./platform/git.js";
 import { loadProject, planProject, writeProjectConfig } from "./platform/project.js";
 import { SqliteMemoryStore } from "./storage/sqlite-store.js";
 
-const VERSION = "0.0.1";
+const VERSION = "0.0.3";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -20,8 +21,15 @@ Usage:
   polarbear-memory search QUERY [--limit N]
   polarbear-memory get MEMORY_ID
   polarbear-memory context --task TEXT [--budget N]
+  polarbear-memory verify MEMORY_ID --result STATE --reason TEXT
+  polarbear-memory forget MEMORY_ID --reason TEXT
   polarbear-memory status
   polarbear-memory doctor
+  polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
+  polarbear-memory claude install [--dry-run] [--command EXECUTABLE]
+  polarbear-memory claude restore
+  polarbear-memory hook ingest --event Stop|SessionEnd
+  polarbear-memory spool replay
   polarbear-memory rebuild-index
   polarbear-memory backup
   polarbear-memory benchmark FIXTURE.json
@@ -154,6 +162,38 @@ function status(cwd: string): void {
   });
 }
 
+function verify(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: { result: { type: "string" }, reason: { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const memoryId = parsed.positionals[0];
+  if (parsed.positionals.length !== 1 || !memoryId || !parsed.values.result || !parsed.values.reason) {
+    throw new Error("verify requires MEMORY_ID, --result and --reason.");
+  }
+  if (!(["VERIFIED", "DISPUTED", "UNVERIFIED"] as string[]).includes(parsed.values.result)) {
+    throw new Error("verify --result must be VERIFIED, DISPUTED or UNVERIFIED.");
+  }
+  withStore(cwd, (store, project) => {
+    const memory = store.verify(project.id, memoryId, parsed.values.result as "VERIFIED" | "DISPUTED" | "UNVERIFIED", parsed.values.reason as string, "HUMAN_CLI");
+    console.log(`Memory ${memory.id} is ${memory.verificationState}.`);
+  });
+}
+
+function forget(cwd: string, args: string[]): void {
+  const parsed = parseArgs({ args, options: { reason: { type: "string" } }, allowPositionals: true, strict: true });
+  const memoryId = parsed.positionals[0];
+  if (parsed.positionals.length !== 1 || !memoryId || !parsed.values.reason) {
+    throw new Error("forget requires MEMORY_ID and --reason.");
+  }
+  withStore(cwd, (store, project) => {
+    const memory = store.archive(project.id, memoryId, parsed.values.reason as string, "HUMAN_CLI");
+    console.log(`Memory ${memory.id} archived; no physical data was purged.`);
+  });
+}
+
 function doctor(cwd: string): void {
   const git = discoverGitContext(cwd);
   const project = loadProject(git);
@@ -166,6 +206,8 @@ function doctor(cwd: string): void {
     console.log("FTS5         OK");
   });
   console.log("Git          OK");
+  const integration = planClaudeIntegration(project);
+  console.log(`Claude MCP   ${integration.alreadyInstalled ? "OK" : "NOT INSTALLED"}`);
   console.log("Network      disabled by design");
 }
 
@@ -198,6 +240,96 @@ async function createBackup(cwd: string): Promise<void> {
   }
 }
 
+async function mcp(cwd: string, args: string[]): Promise<void> {
+  const parsed = parseArgs({
+    args,
+    options: {
+      stdio: { type: "boolean", default: false },
+      "project-root": { type: "string" },
+      "admin-tools": { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  if (!parsed.values.stdio) throw new Error("MVP-1 supports only `mcp --stdio`.");
+  const root = parsed.values["project-root"] ?? cwd;
+  const git = discoverGitContext(root);
+  const project = loadProject(git);
+  const store = new SqliteMemoryStore(project.databasePath);
+  store.initializeProject(project);
+  process.once("exit", () => store.close());
+  const { serveMemoryMcpStdio } = await import("./protocol-mcp/server.js");
+  await serveMemoryMcpStdio({ store, project, includeAdminTools: parsed.values["admin-tools"] });
+}
+
+function claude(cwd: string, args: string[]): void {
+  const [action, ...rest] = args;
+  const git = discoverGitContext(cwd);
+  const project = loadProject(git);
+  if (action === "install") {
+    const parsed = parseArgs({
+      args: rest,
+      options: { "dry-run": { type: "boolean", default: false }, command: { type: "string" } },
+      strict: true,
+    });
+    const result = installClaudeIntegration(project, {
+      dryRun: parsed.values["dry-run"],
+      ...(parsed.values.command ? { command: parsed.values.command } : {}),
+    });
+    console.log(`MCP config: ${result.plan.mcpPath}`);
+    console.log(`Rule:       ${result.plan.rulePath}`);
+    console.log(`Hooks:      ${result.plan.settingsPath}`);
+    if (result.plan.alreadyInstalled) console.log("Claude Code integration is already installed.");
+    else if (parsed.values["dry-run"]) console.log("Dry run only; no files were changed.");
+    else {
+      console.log(`Backup:     ${result.backupDir}`);
+      console.log("Claude Code integration installed. Approve the project MCP server when Claude prompts.");
+    }
+    return;
+  }
+  if (action === "restore" && rest.length === 0) {
+    console.log(`Restored Claude Code integration from ${restoreLatestClaudeIntegration(project)}`);
+    return;
+  }
+  throw new Error("claude requires `install [--dry-run]` or `restore`.");
+}
+
+async function readStdinBounded(maxBytes: number): Promise<string> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > maxBytes) throw new Error("Hook input exceeds the size limit.");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function hook(cwd: string, args: string[]): Promise<void> {
+  const [action, ...rest] = args;
+  if (action !== "ingest") return;
+  try {
+    const parsed = parseArgs({ args: rest, options: { event: { type: "string" } }, strict: true });
+    if (parsed.values.event !== "Stop" && parsed.values.event !== "SessionEnd") return;
+    const raw: unknown = JSON.parse(await readStdinBounded(256 * 1024));
+    if (!raw || typeof raw !== "object" || (raw as { hook_event_name?: unknown }).hook_event_name !== parsed.values.event) return;
+    const { ingestClaudeHook } = await import("./adapter-claude-code/hooks.js");
+    ingestClaudeHook(raw, cwd);
+  } catch {
+    // Hooks are observational and must never block Claude Code or write protocol noise.
+  }
+}
+
+async function spool(cwd: string, args: string[]): Promise<void> {
+  if (args.length !== 1 || args[0] !== "replay") throw new Error("spool requires `replay`.");
+  const project = loadProject(discoverGitContext(cwd));
+  const { replayProjectSpool } = await import("./adapter-claude-code/hooks.js");
+  const result = replayProjectSpool(project);
+  console.log(`Spool replayed: ${result.replayed}`);
+  console.log(`Spool failed:   ${result.failed}`);
+  console.log(`Memories:      ${result.finalized}`);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   const cwd = process.cwd();
@@ -209,11 +341,17 @@ async function main(): Promise<void> {
     case "search": return search(cwd, args);
     case "get": return get(cwd, args);
     case "context": return context(cwd, args);
+    case "verify": return verify(cwd, args);
+    case "forget": return forget(cwd, args);
     case "status": return status(cwd);
     case "doctor": return doctor(cwd);
     case "rebuild-index": return withStore(cwd, (store) => { store.rebuildSearchIndex(); console.log("Search index rebuilt."); });
     case "backup": return createBackup(cwd);
     case "benchmark": return benchmark(cwd, args);
+    case "mcp": return mcp(cwd, args);
+    case "claude": return claude(cwd, args);
+    case "hook": return hook(cwd, args);
+    case "spool": return spool(cwd, args);
     default: throw new Error(`Unknown command: ${command}\n\n${usage()}`);
   }
 }
