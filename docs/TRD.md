@@ -329,6 +329,20 @@ Memory Service ── constrained RPC ──► optional provider
 
 Core release package 不捆绑 provider 的 HTTP client dependency；安装 provider 不改变 Core 的 package graph。
 
+CodeGraph 通过通用 `StructuralContextProvider` 接入，而不是把 `callers`、`callees`、`impact`、symbol graph 等能力复制进 Polarbear Memory：
+
+```ts
+interface StructuralContextProvider {
+  capabilities(): Promise<StructuralCapabilities>;
+  findSymbols(query: string): Promise<SymbolReference[]>;
+  relatedSymbols(symbol: SymbolReference): Promise<SymbolRelation[]>;
+  assessImpact(targets: SymbolReference[]): Promise<ImpactSummary>;
+  currentRevision(): Promise<string>;
+}
+```
+
+默认实现是无外部依赖的 `NoopStructuralContextProvider`；v0.2 可增加进程外 `CodeGraphProvider`。Provider 缺失、版本不兼容或故障时，`memory_context` 自动退化为 Memory + Git，不影响核心流程，也不新增 `memory_callers`、`memory_callees`、`memory_symbol_search` 等 MCP 工具。
+
 ## 8. 数据存储
 
 ### 8.1 数据位置
@@ -419,6 +433,7 @@ confidence_milli, importance_milli,
 lifecycle_status, verification_state,
 source_type, source_ref_hash?, commit_sha?,
 content_hash, created_at, updated_at, last_verified_at?,
+review_after?, archived_at?, lifecycle_reason?,
 supersedes_id?, extractor_version
 ```
 
@@ -455,7 +470,19 @@ context_pack_items(context_pack_id, memory_id, rank,
 
 retrieval_feedback(id, context_pack_id, memory_id,
                    feedback_kind, actor_kind, created_at)
+
+memory_usage_stats(memory_id, candidate_count, selected_count,
+                   positive_feedback_count, negative_feedback_count,
+                   last_candidate_at?, last_selected_at?, last_positive_at?,
+                   updated_at)
+
+lifecycle_assessments(id, memory_id, policy_version,
+                      correctness_risk_milli, relevance_score_milli,
+                      proposed_action, reason_codes_json,
+                      checked_commit?, assessed_at)
 ```
+
+`memory_usage_stats` 是可重建的使用统计，不代表事实正确性；`lifecycle_assessments` 保存每次自动判断的输入摘要、原因和结果，保证归档与降权可解释、可回放。不得仅因为一条 Memory 长期未被召回，就把它判定为错误。
 
 #### Raw events
 
@@ -599,6 +626,12 @@ v0.1 pipeline：
 
 ## 11. Lifecycle 与 Stale Detection
 
+Polarbear Memory 的价值不在于无限累积，而在于让活跃知识集合持续保持小、相关、可信。生命周期遵守以下总原则：
+
+> 自动淘汰出上下文，谨慎淘汰出数据库；时间影响相关性，证据决定正确性。
+
+系统把“淘汰”拆成四个相互独立的层次，不用单一 TTL 同时承担正确性、相关性和删除责任。
+
 ### 11.1 状态机
 
 ```text
@@ -616,7 +649,63 @@ REJECTED             ARCHIVED                     ACTIVE
 
 Verification 是正交维度：`UNVERIFIED / VERIFIED / DISPUTED`。
 
-### 11.2 v0.1 Stale 算法
+### 11.2 四层知识淘汰机制
+
+#### 第一层：正确性淘汰（Correctness）
+
+目标是识别“这条知识可能已经不正确”，而不是判断它是否常用。
+
+- 依据 file anchor、content digest、symbol、commit、测试 evidence 和冲突关系评估 stale risk。
+- 源代码或配置显著变化后进入 `POTENTIALLY_STALE`，降低检索权重。
+- HIGH stale 不进入 Context Pack 的确定事实区，只能作为 Warning 或被排除。
+- 时间本身不能把 `VERIFIED` 变成错误；只有来源变化、矛盾证据或人工判断能改变正确性状态。
+
+#### 第二层：替代淘汰（Supersession）
+
+目标是阻止新旧结论同时污染上下文。
+
+- 新结论明确替代旧结论时建立 `SUPERSEDES` 关系，旧记录进入 `SUPERSEDED`。
+- 相互矛盾但证据不足时只建立 `CONTRADICTS`，两者都不能静默覆盖对方。
+- 同 scope 的 `TASK_STATE` 采用单活跃记录：新进度更新 revision 或 supersede 旧进度，不能每个 session 无限制新增。
+- `SUPERSEDED` 默认不参与普通 Context Pack，但保留用于回答“以前为什么这样做”。
+
+#### 第三层：价值衰减（Utility / Relevance）
+
+目标是判断“即使仍然正确，这次是否值得占用 token”。它只影响召回、排序和自动归档建议，不改变 verification state。
+
+正向信号包括：当前 task/scope 命中、近期被选入 Context Pack、用户或 Agent 给出 useful feedback、强 evidence、跨 session 重复解决问题。负向信号包括：任务已经结束、branch 已合并或删除、scope 不存在、长期只进入候选集但从未被选择、重复负反馈、被更具体的知识覆盖。
+
+- `candidate_count` 只表示曾进入候选集合，不等同于被使用。
+- `selected_count` 只表示占用了 Context Pack，也不自动等同于有价值。
+- 只有显式反馈或后续任务结果才能提高 `positive_feedback_count`。
+- “越常被召回越重要”必须有上限，防止 popularity feedback loop 永久挤压新知识。
+- 衰减函数、阈值和 reason codes 固定版本；相同输入必须得到确定性结果。
+
+#### 第四层：存储保留（Retention）
+
+目标是控制数据库和临时数据增长，同时保留可恢复性。
+
+- 自动维护可以清理已完成提取的 Raw Event、可重建索引和过期诊断数据。
+- 对 canonical Memory，自动化最多执行 `ARCHIVED` 或生成 purge proposal，不能静默物理删除。
+- `forget` 立即从检索和导出排除；`purge` 必须由 Human CLI 或 Polarbear Desktop 明确确认。
+- 达到容量软上限时先去重、合并 evidence、归档低价值短期 Memory，再提示用户审阅 purge proposal；不得为了继续采集而暗中删除历史。
+
+### 11.3 按 Memory 类型治理
+
+| 类型 | 默认时效与自动动作 | 不允许的行为 |
+| --- | --- | --- |
+| `TASK_STATE` | 每个 task/scope 仅保留一个活跃状态；任务完成后立即退出默认 Context，7 天后自动归档 | 不能把旧进度与新进度同时作为当前状态 |
+| `TODO` | 完成或取消后立即退出默认 Context，7 天后归档；未完成 TODO 不因年龄自动消失 | 不能仅因长期未完成就自动标记已完成 |
+| `WORKAROUND` | 默认 14 天进入复核；相关代码、配置或依赖变化立即 stale | 不能长期作为无警告的正式方案 |
+| `FACT` / `COMMAND` | 依赖 anchor/evidence 检查；无 anchor 且 90 天未验证时进入复核队列 | 时间到期不能直接判错 |
+| `DECISION` / `ARCHITECTURE` / `CONVENTION` | 不设置纯时间自动归档；通过 source change、supersede 或人工判断退出活跃集合 | 不能因为“很久没用”自动删除 |
+| `PITFALL` / `FAILURE` | 长期保留，相关实现变化后 stale；被新证据证明不再适用时 supersede/archive | 不能因为低频而丢失罕见但高代价经验 |
+| `PREFERENCE` | scope 或用户明确变更时 supersede；不使用固定 TTL | 不能从一次 Agent 行为推断偏好已改变 |
+| `CANDIDATE`（任意类型） | 30 天未接受、无后续 evidence 且从未被选用时自动归档 | 不能自动提升为 verified |
+
+上述天数是 v0.1 安全默认值，可由用户级 policy 收紧或放宽；repo 内配置不能要求物理 purge，也不能放宽安全上限。Durable Knowledge Markdown 不受自动归档控制，只通过 Git review 修改。
+
+### 11.4 v0.1 Stale 算法
 
 每个 file anchor 保存：
 
@@ -629,7 +718,7 @@ Verification 是正交维度：`UNVERIFIED / VERIFIED / DISPUTED`。
 增量评估：
 
 1. 找出 `last_checked_commit..HEAD` 变化文件。
-2. 未触及任何 anchor：risk 保持或因时间轻微衰减。
+2. 未触及任何 anchor：correctness risk 保持；时间只允许影响独立的 relevance score。
 3. 文件变化、digest 仍匹配：LOW/MEDIUM。
 4. digest 不匹配但 symbol 仍存在：MEDIUM。
 5. symbol/文件消失、diff overlap 高或出现冲突 memory：HIGH。
@@ -637,7 +726,20 @@ Verification 是正交维度：`UNVERIFIED / VERIFIED / DISPUTED`。
 
 首版不尝试通过行号自动“修复”语义变化。v0.2 引入 tree-sitter 前先用 benchmark 确认 symbol-aware anchor 的增益。
 
-### 11.3 可解释性
+### 11.5 生命周期维护任务
+
+v0.1 不需要常驻 daemon。维护任务在 `memory_context` 前做有界增量检查，并在 session finalization、`maintain`、Desktop Admin API 调用时继续执行：
+
+1. 读取上次 lifecycle cursor，只处理发生变化的 task、branch、anchor 和新反馈。
+2. 计算 correctness risk 与 relevance score，两者分开保存。
+3. 先应用 hard exclusion：`REJECTED / SUPERSEDED / ARCHIVED / forgotten`。
+4. 对短期类型执行确定性的 merge、review 或 archive；对长期类型只降权或请求复核。
+5. 生成可解释报告：保留、降权、警告、归档和 purge proposal 各有 reason code。
+6. 在单事务中写入状态与 assessment；失败时回滚，不阻断 Agent session。
+
+每次最多评估固定数量，超出部分保存 cursor 后续处理，避免维护成本随数据库大小线性进入 session 启动延迟。
+
+### 11.6 可解释性与可逆性
 
 任何 stale state 更新保存：
 
@@ -649,6 +751,13 @@ Verification 是正交维度：`UNVERIFIED / VERIFIED / DISPUTED`。
 - `assessor_version`
 
 UI 和 Context Pack 不直接显示内部分数，但必须显示人类可懂的 reason。
+
+所有自动归档必须：
+
+- 保存原状态、policy version、reason codes 和时间。
+- 可由用户一键恢复，恢复后不会立刻被同一规则再次归档。
+- 在 Desktop 的 Lifecycle Review 中展示“为什么退出活跃集合”。
+- 支持 dry-run：只生成计划，不修改状态。
 
 ## 12. Retrieval 与 Context Compiler
 
@@ -684,8 +793,15 @@ Compression → token guard → source/warning audit → Context Pack
 - `strong_evidence`
 - `potentially_stale`
 - `duplicate_cluster`
+- `task_completed`
+- `scope_inactive`
+- `recently_useful`
+- `utility_decay`
+- `review_overdue`
 
 排序必须稳定：相同 score 依次以 importance、updated_at、memory_id 决胜，保证 benchmark 可复现。
+
+正确性风险与相关性分数不能合并为一个不可解释的“质量分”。一个低频但仍正确的架构决策可以保持 `VERIFIED`，只是不进入无关任务的 Context Pack；一个近期频繁命中的 stale 结论也不能因此恢复为可信事实。
 
 ### 12.3 Compression
 
@@ -749,6 +865,18 @@ Agent host ⇄ stdin/stdout ⇄ polarbear-memory mcp --stdio
 - `memory_verify`
 - `memory_forget`
 - `memory_status`
+
+这 7 项是协议能力全集，不代表默认全部展示给 Agent。v0.1 默认 MCP tool surface 为：
+
+```text
+memory_context
+memory_get
+memory_search
+memory_record
+memory_verify
+```
+
+`memory_status` 默认作为诊断能力按需启用；`memory_forget` 默认不列入 Agent 工具面，只提供给 Human CLI / Polarbear Admin Plane。即使管理员显式向 Agent 开放 `memory_forget`，它也只能 archive 或创建删除请求，不能执行物理 purge。
 
 技术要求：
 
@@ -992,7 +1120,7 @@ PlantUML 官方安全文档明确说明不同 profile 对本地文件和 URL 的
 | Database corruption | crash/concurrent migration | WAL、短事务、backup、single migrator lock、recovery tests |
 | SQLite abuse | FTS/query/extension | prepared statements、safe FTS builder、disable extensions、limits |
 | Local socket hijack | 同机其他用户连接 | 0700 dir、user-only socket/pipe、peer credential/capability |
-| Remote exfiltration | renderer/provider/update check | no-network runtime、feature graph gate、egress tests |
+| Remote exfiltration | renderer/provider/update check | zero-egress policy、bundle/import gate、egress tests |
 | Dependency compromise | malicious npm package/release | lockfile、exact version、install-script deny、license/audit gate、SBOM、signed release |
 | Malicious Markdown | HTML/image/link/diagram load | sanitize、disable HTML/remote resources、no remote renderer |
 
@@ -1184,6 +1312,14 @@ capture_mode = "summary"
 raw_event_retention_days = 7
 default_context_budget = 1000
 
+[lifecycle]
+policy_version = 1
+candidate_archive_days = 30
+completed_task_archive_days = 7
+workaround_review_days = 14
+unanchored_fact_review_days = 90
+auto_purge_canonical_memory = false
+
 [paths]
 include = ["**"]
 exclude = [".env*", "**/secrets/**", "**/.git/**"]
@@ -1277,6 +1413,7 @@ Parser 使用 `deny_unknown_fields` 还是兼容保留未知字段，需在 MVP-
 6. **End-to-end fixture**：session A capture → session B context → task outcome。
 7. **Security/fuzz**：hook/MCP/FTS/path/Markdown。
 8. **Benchmark**：baseline vs treatment。
+9. **Lifecycle simulation**：可控时钟下的类型策略、衰减、归档、恢复和容量增长。
 
 ### 23.2 必须覆盖的故障
 
@@ -1289,6 +1426,9 @@ Parser 使用 `deny_unknown_fields` 还是兼容保留未知字段，需在 MVP-
 - MCP client 中断、stdout 污染、request timeout。
 - Desktop/API version mismatch。
 - knowledge Markdown 含 HTML、remote image、PlantUML URL include。
+- 时钟跳变、长期休眠、branch merge/delete 和 task reopen 导致的错误归档。
+- 高频召回造成 popularity feedback loop，或低频高价值 PITFALL 被挤出。
+- lifecycle 任务中断后重复执行导致非幂等状态变化。
 
 ### 23.3 Release Gate
 
@@ -1413,9 +1553,9 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 
 证伪条件：自动候选 precision 过低；保留 MVP-1 手动模式，重新定义 finalization schema 和阈值。
 
-### MVP-3 / v0.0.4 — Trust & Staleness（2–3 周）
+### MVP-3 / v0.0.4 — Trust, Staleness & Retention（2–3 周）
 
-**要验证**：当代码变化时，Memory 能提示“不应直接相信”，而不是放大错误。
+**要验证**：当代码变化时，Memory 能提示“不应直接相信”；当使用时间增长时，活跃集合仍保持小、相关、可信，而不是放大错误或无限累积。
 
 新增能力：
 
@@ -1425,6 +1565,10 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 - conflict/supersede relation。
 - verify/dispute CLI/MCP。
 - Context Pack warning 与 stale penalty。
+- 四层知识淘汰机制与按类型 lifecycle policy。
+- usage stats、lifecycle assessment audit 和有界增量 `maintain --dry-run`。
+- TASK_STATE 单活跃记录、已完成短期知识自动退出默认 Context。
+- 自动归档可恢复；canonical Memory 禁止自动 purge。
 - malicious memory / prompt injection fixture。
 
 可运行演示：
@@ -1432,6 +1576,10 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 ```text
 记录“FAILED 是终态”并关联源码；修改相关逻辑后再次询问。
 系统把旧结论放入 Warning，要求检查当前实现。
+
+模拟同一项目运行 180 天并持续产生 TASK_STATE/TODO/DECISION/PITFALL。
+系统压住活跃集合增长，完成任务不再污染 Context；低频高价值 PITFALL 仍可召回，
+所有自动归档可解释、可恢复，且没有 canonical Memory 被自动 purge。
 ```
 
 退出门槛：
@@ -1440,6 +1588,11 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 - 无变化的 verified memory 不被大量误报。
 - 每次状态变化有 reason code 和 checked commit。
 - 任务成功率不低于无 Memory baseline。
+- 四层机制达到 [知识淘汰机制验证方案](MEMORY_RETENTION_VALIDATION.md) 的 Go 阈值。
+- 活跃 Memory 增长率随完成任务数趋稳，而非随 session 数线性增长。
+- 关键长期知识误归档率为 0；自动归档 precision ≥ 95%。
+- archive → restore round-trip 100% 保留正文、evidence、revision 和关系。
+- invariant test 证明 Agent 与自动维护路径均不能物理 purge canonical Memory。
 
 证伪条件：基于路径/digest 的误报无法接受；在进入 Viewer 前评估最小 tree-sitter experiment，但不默认全语言支持。
 
@@ -1538,7 +1691,7 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 | MVP-0 v0.0.1 | 1–2 周 | CLI record → context → benchmark | FTS 能支持基础 resume | 正确召回且预算合规 |
 | MVP-1 v0.0.2 | 2 周 | Claude MCP 显式记录与恢复 | Agent 会使用工具 | file reads 下降 ≥20% |
 | MVP-2 v0.0.3 | 2–3 周 | 无命令自动 handoff | capture 精度足够 | ≥80% 自动形成可用 handoff |
-| MVP-3 v0.0.4 | 2–3 周 | 代码变化后 stale warning | 可控制误导风险 | HIGH stale 100% 警告/排除 |
+| MVP-3 v0.0.4 | 2–3 周 | stale warning + 四层知识淘汰 | 控制误导与无意义增长 | HIGH stale 100% 警告/排除，自动归档 precision ≥95% |
 | MVP-4 v0.0.5 | 2–3 周 | Polarbear 可视审阅与 Promote | UI 提升信任/纠错 | 独立故障域、零隐式外联 |
 | v0.1 GA | 2–3 周 | 可安装、可恢复、可发布 | 有稳定产品价值 | PRD 发布门槛全部通过 |
 | v0.2 | 6–8 周 | 跨 Agent + optional CodeGraph | 独立 memory layer 成立 | 3 Agent 一致且可降级 |

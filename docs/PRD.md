@@ -88,6 +88,7 @@ AI 编程工具已具备规则文件、自动记忆、Skills、Hooks 或 MCP 等
 8. **No transcript hoarding**：默认不保存完整对话，只提取未来可复用的知识。
 9. **Benchmark before claims**：不以主观感受宣传效果，用可重复实验衡量收益和风险。
 10. **Polarbear is optional**：Desktop 提升可见性与可管理性，但不成为 Agent 使用 Memory 的前置条件。
+11. **Memory must earn its place**：短期知识在任务结束后退出活跃上下文，长期知识按证据而非年龄判断；自动淘汰出上下文，物理删除必须由用户确认。
 
 ## 5. 目标与非目标
 
@@ -105,6 +106,8 @@ v0.1 只需要证明一个核心假设：
 - 每条返回的记忆可追溯到来源，并明确显示陈旧或低置信风险。
 - 用户可通过 CLI 和 Polarbear Viewer 查看、修正、验证、提升或遗忘记忆。
 - 安装后正常使用无需反复执行 `/save-memory`、`/handoff` 或 `/remember-this`。
+- 已完成任务、被替代结论和无价值候选不会随 session 数量持续堆积在活跃上下文中。
+- 长期运行时 Context Pack 污染率应 ≤ 5%，关键知识召回率应 ≥ 95%，且 canonical Memory 不会被自动物理删除。
 
 ### 5.2 非目标
 
@@ -1168,4 +1171,3 @@ and gives your agent only the context it needs.
 - Polarbear Desktop 是可选管理客户端，通过稳定接口连接，绝不直接操作数据库。
 - v0.1 以“隔天直接续做”和“重复探索成本至少降低 40%”作为发布证明。
 - stale memory、隐私泄漏和上下文过载是首要 guardrail，优先级高于记忆数量。
-
