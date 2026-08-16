@@ -1,0 +1,34 @@
+{
+  "name": "resume-basic",
+  "task": "continue issue 42 settlement recovery",
+  "budget": 800,
+  "memories": [
+    {
+      "type": "DECISION",
+      "summary": "FAILED is a terminal settlement state",
+      "content": "Recovery must create a new attempt instead of mutating a FAILED settlement.",
+      "files": ["src/settlement.ts"]
+    },
+    {
+      "type": "PITFALL",
+      "summary": "Do not retry settlement inside the database transaction",
+      "content": "The previous approach held row locks during remote calls and caused timeouts.",
+      "files": ["src/settlement.ts"]
+    },
+    {
+      "type": "TASK_STATE",
+      "summary": "Issue 42 recovery path is implemented; tests remain",
+      "content": "Next action: add terminal-state recovery coverage.",
+      "files": ["test/settlement.test.ts"]
+    },
+    {
+      "type": "TODO",
+      "summary": "Update unrelated dashboard colors",
+      "content": "This is unrelated to settlement recovery."
+    }
+  ],
+  "expected": [
+    "FAILED is a terminal settlement state",
+    "Issue 42 recovery path is implemented; tests remain"
+  ]
+}
