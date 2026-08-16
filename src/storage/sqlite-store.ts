@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Memory, MemorySearchResult, MemoryType, RecordMemoryInput, VerificationState } from "../domain/memory.js";
 import type {
@@ -211,8 +211,7 @@ function quoteSqliteLiteral(value: string): string {
 }
 
 function existingSchemaVersion(db: DatabaseSync): { hasData: boolean; version: number } {
-  const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('memories', 'schema_migrations')").all()
-    as Array<{ name: string }>;
+  const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('memories', 'schema_migrations')").all() as Array<{ name: string }>;
   const hasData = tables.some((row) => row.name === "memories");
   if (!tables.some((row) => row.name === "schema_migrations")) return { hasData, version: 0 };
   const row = db.prepare("SELECT coalesce(max(version), 0) AS version FROM schema_migrations").get() as { version: number };
@@ -240,37 +239,55 @@ export class SqliteMemoryStore implements MemoryStore {
       this.#db.close();
       throw new Error(`Database schema ${existing.version} is newer than this Engine supports (${CURRENT_SCHEMA_VERSION}). Upgrade Polarbear Memory before writing.`);
     }
+    let migrationBackupPath: string | undefined;
     if (databasePath !== ":memory:" && existing.hasData && existing.version < CURRENT_SCHEMA_VERSION) {
       const migrationBackupDirectory = join(dirname(databasePath), "backups", "migrations");
       mkdirSync(migrationBackupDirectory, { recursive: true, mode: 0o700 });
       const backupPath = join(migrationBackupDirectory, `schema-${existing.version}-to-${CURRENT_SCHEMA_VERSION}-${Date.now()}.db`);
       if (existsSync(backupPath)) throw new Error("Migration backup target already exists.");
       this.#db.exec(`VACUUM INTO ${quoteSqliteLiteral(backupPath)}`);
+      migrationBackupPath = backupPath;
     }
-    this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
-    this.#db.exec(SCHEMA);
-    this.#migrateMemorySourceTypes();
-    this.#migrateLifecycleColumns();
-    this.#migrateUsageColumns();
-    this.#db.exec(`
-      CREATE INDEX IF NOT EXISTS memories_maintenance
-        ON memories(project_id, lifecycle_status, last_checked_commit, completed_at);
-    `);
-    this.#db.exec(`
-      INSERT OR IGNORE INTO memory_revisions(
-        id, memory_id, revision_no, content, summary, reason, actor_kind, created_at
-      )
-      SELECT 'migration-v2-' || id, id, 1, content, summary, 'migrated', 'SYSTEM', created_at
-      FROM memories;
-      INSERT OR IGNORE INTO memory_usage_stats(memory_id) SELECT id FROM memories;
-      INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path)
-        SELECT memory_id, repo_relative_path FROM memory_files;
-    `);
-    const migrationTime = new Date().toISOString();
-    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
-    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
-    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
-    this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
+    try {
+      this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
+      this.#db.exec(SCHEMA);
+      this.#migrateMemorySourceTypes();
+      this.#migrateLifecycleColumns();
+      this.#migrateUsageColumns();
+      this.#db.exec(`
+        CREATE INDEX IF NOT EXISTS memories_maintenance
+          ON memories(project_id, lifecycle_status, last_checked_commit, completed_at);
+      `);
+      this.#db.exec(`
+        INSERT OR IGNORE INTO memory_revisions(
+          id, memory_id, revision_no, content, summary, reason, actor_kind, created_at
+        )
+        SELECT 'migration-v2-' || id, id, 1, content, summary, 'migrated', 'SYSTEM', created_at
+        FROM memories;
+        INSERT OR IGNORE INTO memory_usage_stats(memory_id) SELECT id FROM memories;
+        INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path)
+          SELECT memory_id, repo_relative_path FROM memory_files;
+      `);
+      const migrationTime = new Date().toISOString();
+      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
+      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
+      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
+      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
+    } catch (error) {
+      this.#db.close();
+      if (migrationBackupPath) {
+        const failedPath = `${databasePath}.migration-failed-${Date.now()}`;
+        if (existsSync(databasePath)) renameSync(databasePath, failedPath);
+        copyFileSync(migrationBackupPath, databasePath);
+        for (const suffix of ["-wal", "-shm"]) {
+          const sidecar = `${databasePath}${suffix}`;
+          if (existsSync(sidecar)) renameSync(sidecar, `${failedPath}${suffix}`);
+        }
+        const cause = error instanceof Error ? error.message : String(error);
+        throw new Error(`Database migration failed and the preflight backup was restored. Cause: ${cause}`);
+      }
+      throw error;
+    }
   }
 
   initializeProject(project: { id: string; name: string }): void {

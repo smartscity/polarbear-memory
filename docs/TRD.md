@@ -1633,6 +1633,8 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 
 ### v0.1 GA — Hardened Claude-first Product（2–3 周）
 
+**当前实现状态（0.1.0 release candidate）**：迁移前一致性备份、未来 schema 拒写、失败回滚、备份校验/恢复、可预览安全卸载、脱敏 diagnostics、10k 性能门槛、SBOM、静态 license/offline gate 和 macOS signed/notarized package pipeline 已实现。正式 GA 标签仍被真实 Agent baseline/treatment、连续两周 dogfood、Apple release credential 执行结果、在线 advisory gate 和项目许可证决策阻塞；详见 [GA Readiness](GA_READINESS.md)。
+
 **要验证**：产品是否达到可公开使用和可诚实宣传的标准。
 
 新增能力：

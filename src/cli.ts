@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { platform, release } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { compileContext } from "./application/context.js";
 import { runMaintenance } from "./application/maintenance.js";
 import { runBenchmark } from "./application/benchmark.js";
-import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration } from "./adapter-claude-code/integration.js";
+import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration, uninstallClaudeIntegration } from "./adapter-claude-code/integration.js";
 import { parseMemoryType } from "./domain/memory.js";
 import { discoverGitContext, normalizeRepoFile } from "./platform/git.js";
 import { captureFileAnchors } from "./platform/anchors.js";
-import { loadProject, planProject, writeProjectConfig } from "./platform/project.js";
-import { SqliteMemoryStore } from "./storage/sqlite-store.js";
+import { defaultDataRoot, loadProject, planProject, writeProjectConfig } from "./platform/project.js";
+import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "./storage/sqlite-store.js";
+import { inspectBackup, listBackups, restoreBackup } from "./application/recovery.js";
 
-const VERSION = "0.0.5";
+const VERSION = "0.1.0";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -31,7 +34,7 @@ Usage:
   polarbear-memory relate SOURCE_ID --type supersedes|contradicts --target TARGET_ID --reason TEXT
   polarbear-memory maintain [--dry-run] [--limit N]
   polarbear-memory status
-  polarbear-memory doctor
+  polarbear-memory doctor [--export]
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
   polarbear-memory service run
   polarbear-memory claude install [--dry-run] [--command EXECUTABLE]
@@ -39,7 +42,8 @@ Usage:
   polarbear-memory hook ingest --event Stop|SessionEnd
   polarbear-memory spool replay
   polarbear-memory rebuild-index
-  polarbear-memory backup
+  polarbear-memory backup [create|list|verify FILE|restore FILE --confirm FILE]
+  polarbear-memory uninstall [--dry-run] [--keep-data|--delete-data --confirm PROJECT_ID]
   polarbear-memory benchmark FIXTURE.json
 `;
 }
@@ -313,7 +317,8 @@ function forget(cwd: string, args: string[]): void {
   });
 }
 
-function doctor(cwd: string): void {
+function doctor(cwd: string, args: string[]): void {
+  const parsed = parseArgs({ args, options: { export: { type: "boolean", default: false } }, strict: true });
   const git = discoverGitContext(cwd);
   const project = loadProject(git);
   console.log(`Polarbear Memory ${VERSION}`);
@@ -328,6 +333,28 @@ function doctor(cwd: string): void {
   const integration = planClaudeIntegration(project);
   console.log(`Claude MCP   ${integration.alreadyInstalled ? "OK" : "NOT INSTALLED"}`);
   console.log("Network      disabled by design");
+  if (parsed.values.export) {
+    const diagnosticsDirectory = join(project.dataDir, "diagnostics");
+    mkdirSync(diagnosticsDirectory, { recursive: true, mode: 0o700 });
+    const path = join(diagnosticsDirectory, `doctor-${new Date().toISOString().replaceAll(":", "-")}.json`);
+    const statusCounts = withStore(cwd, (store, current) => store.status(current.id));
+    const report = {
+      formatVersion: 1,
+      generatedAt: new Date().toISOString(),
+      engineVersion: VERSION,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      runtime: process.version,
+      platform: { os: platform(), release: release(), arch: process.arch },
+      projectRef: createHash("sha256").update(project.id).digest("hex").slice(0, 16),
+      repository: { branchPresent: Boolean(git.branch), headPresent: Boolean(git.head) },
+      counts: statusCounts,
+      integrations: { claudeInstalled: planClaudeIntegration(project).alreadyInstalled },
+      networkPolicy: "disabled",
+    };
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    console.log(`Diagnostics  ${path}`);
+    console.log("Diagnostics contain no Memory content, repository path, commit, branch name, environment, or database path.");
+  }
 }
 
 function benchmark(cwd: string, args: string[]): void {
@@ -345,7 +372,7 @@ function benchmark(cwd: string, args: string[]): void {
   }
 }
 
-async function createBackup(cwd: string): Promise<void> {
+async function createBackup(cwd: string): Promise<string> {
   const git = discoverGitContext(cwd);
   const project = loadProject(git);
   const destination = join(project.dataDir, "backups", `memory-${new Date().toISOString().replaceAll(":", "-")}.db`);
@@ -354,9 +381,78 @@ async function createBackup(cwd: string): Promise<void> {
     const pages = await store.backup(destination);
     console.log(`Backup created: ${destination}`);
     console.log(`Pages copied: ${pages}`);
+    return destination;
   } finally {
     store.close();
   }
+}
+
+async function backupCommand(cwd: string, args: string[]): Promise<void> {
+  const [action = "create", ...rest] = args;
+  if (action === "create" && rest.length === 0) {
+    await createBackup(cwd);
+    return;
+  }
+  const project = loadProject(discoverGitContext(cwd));
+  if (action === "list" && rest.length === 0) {
+    const backups = listBackups(project);
+    if (backups.length === 0) return console.log("No database backups found.");
+    for (const item of backups) console.log(`${item.fileName}\tschema=${item.schemaVersion}\tbytes=${item.bytes}\tsha256=${item.sha256}\tintegrity=${item.integrity}`);
+    return;
+  }
+  if (action === "verify" && rest.length === 1 && rest[0]) {
+    console.log(JSON.stringify(inspectBackup(project, rest[0]), null, 2));
+    return;
+  }
+  if (action === "restore") {
+    const parsed = parseArgs({ args: rest, options: { confirm: { type: "string" } }, allowPositionals: true, strict: true });
+    const input = parsed.positionals[0];
+    if (parsed.positionals.length !== 1 || !input) throw new Error("backup restore requires exactly one backup file.");
+    const inspection = inspectBackup(project, input);
+    if (parsed.values.confirm !== inspection.fileName) {
+      console.log(JSON.stringify(inspection, null, 2));
+      console.log(`Dry run only. Re-run with --confirm ${inspection.fileName} to replace the operational database.`);
+      return;
+    }
+    const result = restoreBackup(project, input);
+    console.log(`Restored ${result.restored.fileName} after integrity and schema validation.`);
+    if (result.rollbackPath) console.log(`Previous database preserved at ${result.rollbackPath}`);
+    return;
+  }
+  throw new Error("backup requires create, list, verify FILE, or restore FILE [--confirm FILE].");
+}
+
+function uninstall(cwd: string, args: string[]): void {
+  const parsed = parseArgs({
+    args,
+    options: {
+      "dry-run": { type: "boolean", default: false },
+      "keep-data": { type: "boolean", default: false },
+      "delete-data": { type: "boolean", default: false },
+      confirm: { type: "string" },
+    },
+    strict: true,
+  });
+  if (parsed.values["keep-data"] && parsed.values["delete-data"]) throw new Error("Choose either --keep-data or --delete-data.");
+  const project = loadProject(discoverGitContext(cwd));
+  const result = uninstallClaudeIntegration(project, { dryRun: parsed.values["dry-run"] });
+  console.log(`Claude MCP entry: ${result.plan.mcpEntry ? "remove" : "unchanged"}`);
+  console.log(`Claude hooks: ${result.plan.hooks} managed entries to remove`);
+  console.log(`Claude rule: ${result.plan.managedRule ? "remove" : result.plan.modifiedRulePreserved ? "preserve modified file" : "unchanged"}`);
+  if (parsed.values["dry-run"]) return console.log("Dry run only; no files were changed.");
+  if (result.backupDir) console.log(`Integration backup: ${result.backupDir}`);
+  if (!parsed.values["delete-data"]) return console.log(`Project data preserved at ${project.dataDir}`);
+  if (parsed.values.confirm !== project.id) {
+    console.log(`Data deletion was not performed. Re-run with --delete-data --confirm ${project.id}`);
+    return;
+  }
+  if (!existsSync(project.dataDir) || !lstatSync(project.dataDir).isDirectory()) return console.log("Project data is already absent.");
+  const trashRoot = join(defaultDataRoot(), "trash");
+  mkdirSync(trashRoot, { recursive: true, mode: 0o700 });
+  const destination = join(trashRoot, `${project.id}-${new Date().toISOString().replaceAll(":", "-")}`);
+  renameSync(project.dataDir, destination);
+  console.log(`Project data moved to recoverable trash: ${destination}`);
+  console.log("Repository configuration and promoted Markdown were preserved.");
 }
 
 async function mcp(cwd: string, args: string[]): Promise<void> {
@@ -468,9 +564,10 @@ async function main(): Promise<void> {
     case "relate": return relate(cwd, args);
     case "maintain": return maintain(cwd, args);
     case "status": return status(cwd);
-    case "doctor": return doctor(cwd);
+    case "doctor": return doctor(cwd, args);
     case "rebuild-index": return withStore(cwd, (store) => { store.rebuildSearchIndex(); console.log("Search index rebuilt."); });
-    case "backup": return createBackup(cwd);
+    case "backup": return backupCommand(cwd, args);
+    case "uninstall": return uninstall(cwd, args);
     case "benchmark": return benchmark(cwd, args);
     case "mcp": return mcp(cwd, args);
     case "service": {

@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import type { ProjectBinding } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION } from "../storage/sqlite-store.js";
@@ -11,6 +11,7 @@ export interface BackupInspection {
   schemaVersion: number;
   integrity: "ok";
   bytes: number;
+  sha256: string;
 }
 
 function assertContainedBackup(project: ProjectBinding, input: string): string {
@@ -32,7 +33,14 @@ export function inspectBackup(project: ProjectBinding, input: string): BackupIns
     if (hasMigrations.count !== 1) throw new Error("Backup has no schema migration history.");
     const schema = db.prepare("SELECT coalesce(max(version), 0) AS version FROM schema_migrations").get() as { version: number };
     if (schema.version > CURRENT_SCHEMA_VERSION) throw new Error(`Backup schema ${schema.version} requires a newer Engine.`);
-    return { path, fileName: basename(path), schemaVersion: schema.version, integrity: "ok", bytes: lstatSync(path).size };
+    return {
+      path,
+      fileName: basename(path),
+      schemaVersion: schema.version,
+      integrity: "ok",
+      bytes: lstatSync(path).size,
+      sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+    };
   } finally {
     db.close();
   }

@@ -25,12 +25,11 @@ function filesUnder(directory) {
   return files;
 }
 
-if (process.argv.includes("--scan-dist")) {
-  const dist = join(rootPath, "dist");
-  for (const file of filesUnder(dist)) {
-    if (extname(file) !== ".js" || file.endsWith(".test.js") || file.includes(`${join("dist", "test")}`)) continue;
+function scanRuntime(directory, extension, testSuffix, testDirectory) {
+  for (const file of filesUnder(directory)) {
+    if (extname(file) !== extension || file.endsWith(testSuffix) || file.includes(testDirectory)) continue;
     const source = readFileSync(file, "utf8");
-    const isLocalSocketModule = file.includes(`${join("dist", "protocol-local")}`);
+    const isLocalSocketModule = file.includes(`${join("protocol-local")}`);
     const forbiddenImport = isLocalSocketModule
       ? /node:(?:http|https|tls|dns)/u
       : /node:(?:http|https|net|tls|dns)/u;
@@ -40,8 +39,12 @@ if (process.argv.includes("--scan-dist")) {
     if (isLocalSocketModule && /\.listen\s*\(\s*(?:\d|\{)/u.test(source)) {
       failures.push(`TCP-style listen in local socket module: ${file}`);
     }
+    if (/\b(?:eval|Function)\s*\(/u.test(source)) failures.push(`dynamic code execution in runtime: ${file}`);
   }
 }
+
+if (process.argv.includes("--scan-source")) scanRuntime(join(rootPath, "src"), ".ts", ".test.ts", `${join("src", "test")}`);
+if (process.argv.includes("--scan-dist")) scanRuntime(join(rootPath, "dist"), ".js", ".test.js", `${join("dist", "test")}`);
 
 if (failures.length > 0) throw new Error(`Runtime dependency policy rejected:\n${failures.join("\n")}`);
 console.log(`Runtime dependency policy OK: ${allowedRuntime.size} allowlisted packages, no install scripts.`);

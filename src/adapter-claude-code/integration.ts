@@ -32,6 +32,13 @@ interface BackupManifest {
   files: Record<typeof MCP_FILE | typeof RULE_FILE | typeof SETTINGS_FILE, string | null>;
 }
 
+export interface ClaudeUninstallPlan {
+  mcpEntry: boolean;
+  hooks: number;
+  managedRule: boolean;
+  modifiedRulePreserved: boolean;
+}
+
 export interface ClaudeIntegrationPlan {
   mcpPath: string;
   rulePath: string;
@@ -220,4 +227,86 @@ export function restoreLatestClaudeIntegration(project: ProjectBinding): string 
     }
   }
   return backupDir;
+}
+
+function removeManagedMcp(content: string | null): { content: string | null; removed: boolean } {
+  if (content === null) return { content, removed: false };
+  const parsed: unknown = JSON.parse(content);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Existing .mcp.json must contain a JSON object.");
+  const root = parsed as Record<string, unknown>;
+  const servers = root.mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)
+    || !("polarbear-memory" in servers)) return { content, removed: false };
+  const nextServers = { ...(servers as Record<string, unknown>) };
+  delete nextServers["polarbear-memory"];
+  root.mcpServers = nextServers;
+  return { content: `${JSON.stringify(root, null, 2)}\n`, removed: true };
+}
+
+function managedMemoryHook(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  const hooks = (entry as { hooks?: unknown }).hooks;
+  if (!Array.isArray(hooks)) return false;
+  return hooks.some((hook) => {
+    if (!hook || typeof hook !== "object") return false;
+    const command = (hook as { command?: unknown }).command;
+    return typeof command === "string" && /(?:polarbear-memory|\/cli\.js)'? hook ingest --event (?:Stop|SessionEnd)$/u.test(command);
+  });
+}
+
+function removeManagedHooks(content: string | null): { content: string | null; removed: number } {
+  if (content === null) return { content, removed: 0 };
+  const parsed: unknown = JSON.parse(content);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Existing Claude settings must contain a JSON object.");
+  const root = parsed as Record<string, unknown>;
+  const hooks = root.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return { content, removed: 0 };
+  const nextHooks = { ...(hooks as Record<string, unknown>) };
+  let removed = 0;
+  for (const event of ["Stop", "SessionEnd"] as const) {
+    const entries = nextHooks[event];
+    if (!Array.isArray(entries)) continue;
+    nextHooks[event] = entries.filter((entry) => {
+      const managed = managedMemoryHook(entry);
+      if (managed) removed += 1;
+      return !managed;
+    });
+  }
+  root.hooks = nextHooks;
+  return { content: `${JSON.stringify(root, null, 2)}\n`, removed };
+}
+
+export function uninstallClaudeIntegration(
+  project: ProjectBinding,
+  options: { dryRun: boolean },
+): { plan: ClaudeUninstallPlan; backupDir?: string } {
+  const mcpPath = join(project.root, MCP_FILE);
+  const rulePath = join(project.root, RULE_FILE);
+  const settingsPath = join(project.root, SETTINGS_FILE);
+  assertSafeRuleParents(project.root);
+  for (const path of [mcpPath, rulePath, settingsPath]) assertRegularOrMissing(path);
+  const currentMcp = readOptional(mcpPath);
+  const currentRule = readOptional(rulePath);
+  const currentSettings = readOptional(settingsPath);
+  const mcp = removeManagedMcp(currentMcp);
+  const settings = removeManagedHooks(currentSettings);
+  const plan: ClaudeUninstallPlan = {
+    mcpEntry: mcp.removed,
+    hooks: settings.removed,
+    managedRule: currentRule === MANAGED_RULE,
+    modifiedRulePreserved: currentRule !== null && currentRule !== MANAGED_RULE,
+  };
+  if (options.dryRun || (!plan.mcpEntry && plan.hooks === 0 && !plan.managedRule)) return { plan };
+  const backupDir = join(project.dataDir, "backups", "uninstall", `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`);
+  mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  const manifest: BackupManifest = {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    files: { [MCP_FILE]: currentMcp, [RULE_FILE]: currentRule, [SETTINGS_FILE]: currentSettings },
+  };
+  atomicWrite(join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  if (mcp.removed && mcp.content !== null) atomicWrite(mcpPath, mcp.content);
+  if (settings.removed > 0 && settings.content !== null) atomicWrite(settingsPath, settings.content);
+  if (plan.managedRule && existsSync(rulePath)) renameSync(rulePath, join(backupDir, "polarbear-memory.md.removed"));
+  return { plan, backupDir };
 }

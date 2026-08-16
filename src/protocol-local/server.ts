@@ -9,7 +9,7 @@ import { defaultDataRoot, loadProject } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 
 export const ADMIN_API_VERSION = "1.0";
-export const ENGINE_VERSION = "0.0.5";
+export const ENGINE_VERSION = "0.1.0";
 export const ADMIN_CAPABILITIES = [
   "projects.status",
   "memories.list",

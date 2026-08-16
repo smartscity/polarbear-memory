@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ProjectBinding } from "../platform/project.js";
-import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration } from "./integration.js";
+import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration, uninstallClaudeIntegration } from "./integration.js";
 
 function fixture(): { temporary: string; project: ProjectBinding } {
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-claude-"));
@@ -62,6 +62,35 @@ test("Claude restore removes newly installed managed files without deleting the 
     assert.equal(restoredFrom, installed.backupDir);
     assert.throws(() => readFileSync(join(project.root, ".mcp.json"), "utf8"), /ENOENT/);
     assert.match(readFileSync(join(restoredFrom, ".mcp.json.installed"), "utf8"), /polarbear-memory/);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Claude uninstall is previewable and removes only managed entries", () => {
+  const { temporary, project } = fixture();
+  const mcpPath = join(project.root, ".mcp.json");
+  try {
+    writeFileSync(mcpPath, `${JSON.stringify({ mcpServers: { existing: { command: "keep-me" } } }, null, 2)}\n`);
+    installClaudeIntegration(project, { dryRun: false });
+    const settingsPath = join(project.root, ".claude", "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as { hooks: { Stop: unknown[] } };
+    settings.hooks.Stop.unshift({ hooks: [{ type: "command", command: "keep-me", timeout: 2 }] });
+    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+
+    const preview = uninstallClaudeIntegration(project, { dryRun: true });
+    assert.deepEqual(preview.plan, { mcpEntry: true, hooks: 2, managedRule: true, modifiedRulePreserved: false });
+    assert.ok((JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["polarbear-memory"]);
+
+    const result = uninstallClaudeIntegration(project, { dryRun: false });
+    assert.ok(result.backupDir);
+    const mcp = JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    assert.ok(mcp.mcpServers.existing);
+    assert.equal(mcp.mcpServers["polarbear-memory"], undefined);
+    const nextSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as { hooks: { Stop: unknown[]; SessionEnd: unknown[] } };
+    assert.equal(nextSettings.hooks.Stop.length, 1);
+    assert.equal(nextSettings.hooks.SessionEnd.length, 0);
+    assert.throws(() => readFileSync(join(project.root, ".claude", "rules", "polarbear-memory.md"), "utf8"), /ENOENT/);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

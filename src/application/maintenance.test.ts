@@ -304,6 +304,20 @@ test("10k unchanged Memory incremental maintenance stays bounded", () => {
     const durationMs = performance.now() - started;
     assert.equal(result.evaluated, 0);
     assert.ok(durationMs < 200, `Incremental maintenance took ${durationMs.toFixed(1)} ms`);
+    const searchDurations = Array.from({ length: 50 }, (_, index) => {
+      const searchStarted = performance.now();
+      assert.ok(reopened.search(projectId, `Bulk unchanged decision ${9000 + index}`, 10).length > 0);
+      return performance.now() - searchStarted;
+    }).sort((left, right) => left - right);
+    const searchP95 = searchDurations[Math.ceil(searchDurations.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    assert.ok(searchP95 < 150, `10k search p95 took ${searchP95.toFixed(1)} ms`);
+    const contextDurations = Array.from({ length: 20 }, (_, index) => {
+      const contextStarted = performance.now();
+      compileContext(reopened, projectId, `Bulk unchanged decision ${9500 + index}`, 800);
+      return performance.now() - contextStarted;
+    }).sort((left, right) => left - right);
+    const contextP95 = contextDurations[Math.ceil(contextDurations.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    assert.ok(contextP95 < 300, `10k warm context p95 took ${contextP95.toFixed(1)} ms`);
   } finally {
     reopened.close();
   }

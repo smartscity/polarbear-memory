@@ -14,7 +14,8 @@ test("10-session resume suite produces valid packs and clears the file-read prox
     if (!("kind" in result) || result.kind !== "resume-suite") throw new Error("Expected resume suite result.");
     assert.equal(result.validPacks, 10);
     assert.equal(result.totalSessions, 10);
-    assert.ok(result.medianFileReadReductionPercent >= 20);
+    assert.ok(result.medianFileReadReductionPercent >= 30);
+    assert.ok(result.medianTokenReductionPercent >= 40);
     assert.equal(result.passed, true);
   } finally {
     store.close();

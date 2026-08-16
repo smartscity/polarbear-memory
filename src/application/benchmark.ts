@@ -29,6 +29,8 @@ interface ResumeSession {
   budget: number;
   baselineFiles: string[];
   avoidedFiles: string[];
+  baselineTokens?: number;
+  treatmentRediscoveryTokens?: number;
 }
 
 interface ResumeSuiteFixture {
@@ -90,12 +92,15 @@ export interface ResumeSuiteResult {
   validPacks: number;
   totalSessions: number;
   medianFileReadReductionPercent: number;
+  medianTokenReductionPercent: number;
   sessions: Array<{
     id: string;
     passed: boolean;
     estimatedTokens: number;
     baselineFileReads: number;
     treatmentFileReads: number;
+    baselineTokens: number;
+    treatmentTokens: number;
   }>;
 }
 
@@ -164,6 +169,9 @@ function runResumeSuite(store: MemoryStore, projectId: string, fixture: ResumeSu
       estimatedTokens: context.estimatedTokens,
       baselineFileReads: session.baselineFiles.length,
       treatmentFileReads: session.baselineFiles.length - avoided,
+      baselineTokens: session.baselineTokens ?? session.baselineFiles.length * 1_000,
+      treatmentTokens: (session.treatmentRediscoveryTokens ?? (session.baselineFiles.length - avoided) * 1_000)
+        + context.estimatedTokens,
     };
   });
   const reductions = sessions.map((session) => session.baselineFileReads === 0
@@ -171,13 +179,17 @@ function runResumeSuite(store: MemoryStore, projectId: string, fixture: ResumeSu
     : ((session.baselineFileReads - session.treatmentFileReads) / session.baselineFileReads) * 100);
   const validPacks = sessions.filter((session) => session.passed).length;
   const reduction = Math.round(median(reductions) * 10) / 10;
+  const tokenReduction = Math.round(median(sessions.map((session) => session.baselineTokens === 0
+    ? 0
+    : ((session.baselineTokens - session.treatmentTokens) / session.baselineTokens) * 100)) * 10) / 10;
   return {
     name: fixture.name,
     kind: "resume-suite",
-    passed: validPacks === 10 && reduction >= 20,
+    passed: validPacks === 10 && reduction >= 30 && tokenReduction >= 40,
     validPacks,
     totalSessions: sessions.length,
     medianFileReadReductionPercent: reduction,
+    medianTokenReductionPercent: tokenReduction,
     sessions,
   };
 }

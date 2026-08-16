@@ -1,6 +1,6 @@
 # Third-party notices
 
-Polarbear Memory MVP-3 uses a deliberately small third-party runtime surface:
+Polarbear Memory v0.1 uses a deliberately small third-party runtime surface:
 
 | Package | Version | License | Distribution role |
 | --- | --- | --- | --- |
@@ -17,6 +17,8 @@ The development toolchain is pinned in `package-lock.json`:
 | `undici-types` | 7.16.0 | MIT | Transitive development only |
 
 The test-only official MCP client and its transitive dependencies are recorded in `package-lock.json`. They are development dependencies and must not enter the release runtime bundle.
+
+The macOS package includes the pinned Node.js runtime. Node.js is distributed under the MIT license and contains additional third-party software and notices from its official distribution. Release review must preserve the Node runtime's accompanying license obligations; the generated CycloneDX inventory is available at `docs/SBOM.cdx.json`.
 
 This list was derived from the installed package metadata and must be regenerated and reviewed whenever the lockfile changes. Release packaging must preserve the license notices for runtime dependencies and exclude test-only client dependencies.
 

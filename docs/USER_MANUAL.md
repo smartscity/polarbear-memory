@@ -64,7 +64,7 @@ Agent 获得短 Context Pack，直接继续工作
 | v0.1 GA | 安装、升级、恢复、benchmark 和安全发布完整 | 是否可公开稳定使用 |
 | v0.2 | Codex、Cursor、可选 CodeGraph | 跨 Agent Memory 是否成立 |
 
-本手册主要描述 v0.1 GA 的完整体验，并在涉及后续能力时明确标注。
+本手册描述 v0.1 release candidate 的完整目标体验，并在涉及后续能力时明确标注。只有 [GA Readiness](GA_READINESS.md) 中的真实 Agent benchmark、两周 dogfood、签名/公证和许可证 blocker 全部关闭后，才可改称正式 GA。
 
 ## 4. 核心概念
 
@@ -924,7 +924,22 @@ Polarbear Desktop 或 Human CLI 可以：
 
 Promoted Markdown 已进入 Git 时，可以通过 Git 单独恢复；它不等于 operational database 的完整备份。
 
+v0.1 CLI：
+
+```bash
+polarbear-memory backup create
+polarbear-memory backup list
+polarbear-memory backup verify BACKUP.db
+polarbear-memory backup restore BACKUP.db
+# 阅读预览后，以输出的精确文件名确认
+polarbear-memory backup restore BACKUP.db --confirm BACKUP.db
+```
+
+`list/verify` 显示 schema、大小、SHA-256 与 SQLite integrity。恢复会先验证候选，替换前 checkpoint 当前数据库，并把旧数据库保留为 `pre-restore-*.db` rollback。
+
 ## 25. 暂停、卸载和保留数据
+
+v0.1 可先运行 `polarbear-memory uninstall --dry-run` 查看会移除的受管 MCP、hooks 和 rule。默认卸载语义等同 `--keep-data`：只解除 Agent 集成，保留数据库、备份与 Durable Knowledge。
 
 ### 25.1 暂停 Capture
 
@@ -935,8 +950,9 @@ Promoted Markdown 已进入 Git 时，可以通过 Git 单独恢复；它不等�
 卸载流程必须：
 
 - 展示将修改的 Agent 配置。
-- 使用初始化时的 backup 恢复。
-- 移除 Polarbear Memory 自己写入的 marker block。
+- 在修改前保存当前配置 backup。
+- 只移除 Polarbear Memory 自己管理的 MCP entry、hooks 和未被修改的 rule。
+- 用户修改过的 rule 保留并明确报告。
 - 不删除用户其他 MCP 或 hook 配置。
 
 ### 25.3 卸载并保留数据
@@ -951,7 +967,7 @@ polarbear-memory uninstall --keep-data
 
 ### 25.4 删除全部数据
 
-这是独立的高风险操作，必须列出：
+这是独立的高风险操作，必须列出影响范围并以 project UUID 确认。v0.1 不直接永久删除，而是把项目数据目录移动到当前用户的 recoverable trash：
 
 - 涉及的项目。
 - operational database。
@@ -969,7 +985,7 @@ polarbear-memory uninstall --keep-data
 
 ### Desktop 能完全管理 Memory 吗？
 
-架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.0.5 已覆盖浏览、搜索、验证/争议、可恢复归档/恢复、Context Explain 和 Promote；索引、配置、备份恢复与 purge approval 会作为后续 versioned capability 加入。
+架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖浏览、搜索、验证/争议、可恢复归档/恢复、Context Explain 和 Promote；Human CLI 已覆盖数据库备份恢复和安全卸载。Desktop 的索引、配置、备份恢复与 purge approval 会作为后续 versioned capability 加入。
 
 ### 用户需要安装 Node.js 吗？
 

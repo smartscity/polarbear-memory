@@ -8,6 +8,8 @@
       "task": "continue FAILED settlement recovery",
       "expected": "FAILED is a terminal settlement state",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/settlement/state.ts", "src/settlement/recovery.ts", "test/settlement.test.ts", "docs/settlement.md", "src/settlement/index.ts"],
       "avoidedFiles": ["src/settlement/state.ts", "docs/settlement.md"]
     },
@@ -17,6 +19,8 @@
       "task": "resume webhook idempotency event ID work",
       "expected": "Webhook idempotency uses provider event ID",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/webhook/idempotency.ts", "src/webhook/handler.ts", "test/webhook.test.ts", "docs/webhook.md", "src/db/events.ts"],
       "avoidedFiles": ["src/webhook/idempotency.ts", "docs/webhook.md"]
     },
@@ -26,6 +30,8 @@
       "task": "continue cache stampede single-flight implementation",
       "expected": "Cache stampede protection uses single-flight",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/cache/index.ts", "src/cache/single-flight.ts", "src/cache/redis.ts", "test/cache.test.ts", "docs/cache.md"],
       "avoidedFiles": ["src/cache/redis.ts", "docs/cache.md"]
     },
@@ -35,6 +41,8 @@
       "task": "debug reports API 403 scope",
       "expected": "reports:read scope",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/auth/scopes.ts", "src/auth/token.ts", "src/reports/api.ts", "test/reports.test.ts", "docs/auth.md"],
       "avoidedFiles": ["src/auth/token.ts", "docs/auth.md"]
     },
@@ -44,6 +52,8 @@
       "task": "continue migration 17 compatibility test",
       "expected": "backward compatibility test for migration 17",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["migrations/17.sql", "migrations/16.sql", "test/migrations/v17.test.ts", "src/db/migrate.ts", "docs/database.md"],
       "avoidedFiles": ["migrations/16.sql", "docs/database.md"]
     },
@@ -53,6 +63,8 @@
       "task": "resume redemption currency rounding",
       "expected": "rounds currency DOWN at scale 3",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/money/redemption.ts", "src/money/format.ts", "src/money/types.ts", "test/redemption.test.ts", "docs/money.md"],
       "avoidedFiles": ["src/money/types.ts", "docs/money.md"]
     },
@@ -62,6 +74,8 @@
       "task": "fix account event ordering sequence number",
       "expected": "ordered by sequence number",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/events/projector.ts", "src/events/schema.ts", "src/events/consumer.ts", "test/events.test.ts", "docs/events.md"],
       "avoidedFiles": ["src/events/schema.ts", "docs/events.md"]
     },
@@ -71,6 +85,8 @@
       "task": "continue dead-letter retry authorization test",
       "expected": "authorization test remains",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/admin/dead-letter.ts", "src/admin/router.ts", "src/auth/roles.ts", "test/admin.test.ts", "docs/admin.md"],
       "avoidedFiles": ["src/admin/router.ts", "docs/admin.md"]
     },
@@ -80,6 +96,8 @@
       "task": "resume checkout-v2 feature flag cleanup",
       "expected": "Remove checkout-v2 flag",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/checkout/flags.ts", "src/checkout/service.ts", "src/config/flags.ts", "test/checkout.test.ts", "docs/rollout.md"],
       "avoidedFiles": ["src/config/flags.ts", "docs/rollout.md"]
     },
@@ -89,6 +107,8 @@
       "task": "continue scheduling UTC timezone persistence",
       "expected": "UTC instants",
       "budget": 400,
+      "baselineTokens": 5000,
+      "treatmentRediscoveryTokens": 2500,
       "baselineFiles": ["src/schedule/time.ts", "src/schedule/model.ts", "src/account/timezone.ts", "test/schedule.test.ts", "docs/time.md"],
       "avoidedFiles": ["src/account/timezone.ts", "docs/time.md"]
     }

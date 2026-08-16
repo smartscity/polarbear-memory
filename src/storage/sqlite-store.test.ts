@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -149,4 +149,33 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
   } finally {
     migrated.close();
   }
+  const migrationBackups = join(directory, "backups", "migrations");
+  assert.equal(readdirSync(migrationBackups).filter((name) => name.endsWith(".db")).length, 1);
+});
+
+test("refuses to open a database created by a newer Engine", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-newer-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const newer = new DatabaseSync(path);
+  newer.exec("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL) STRICT; INSERT INTO schema_migrations VALUES (999, 'future');");
+  newer.close();
+  assert.throws(() => new SqliteMemoryStore(path), /newer than this Engine supports/);
+});
+
+test("restores the preflight backup when a legacy migration fails", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-broken-migration-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const broken = new DatabaseSync(path);
+  broken.exec("CREATE TABLE memories(id TEXT PRIMARY KEY, source_type TEXT NOT NULL CHECK (source_type IN ('CLI'))) STRICT; INSERT INTO memories VALUES ('preserve-me', 'CLI');");
+  broken.close();
+  assert.throws(() => new SqliteMemoryStore(path), /preflight backup was restored/);
+  const restored = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = restored.prepare("SELECT * FROM memories").get() as { id: string; source_type: string };
+    assert.equal(row.id, "preserve-me");
+    assert.equal(row.source_type, "CLI");
+  } finally { restored.close(); }
+  assert.equal(readdirSync(join(directory, "backups", "migrations")).filter((name) => name.endsWith(".db")).length, 1);
 });

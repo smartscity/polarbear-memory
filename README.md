@@ -1,6 +1,6 @@
 # Polarbear Memory
 
-Local-first persistent memory for coding agents. MVP-4 adds a user-scoped local Admin API and the optional Polarbear Desktop control plane without giving Desktop access to `memory.db`.
+Local-first persistent memory for coding agents. v0.1 hardens the Claude-first product with verified backup/restore, safe uninstall, diagnostics, deterministic GA benchmarks, SBOM and a signed/notarized macOS release pipeline. The current readiness status is **release candidate**, not public GA; see [GA Readiness](docs/GA_READINESS.md).
 
 ## Requirements
 
@@ -26,6 +26,18 @@ polarbear-memory claude install
 ```
 
 For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli.js`.
+
+## v0.1 operations
+
+- `backup create|list|verify FILE`: create and validate SQLite-consistent backups.
+- `backup restore FILE`: preview a restore; confirmation requires the exact displayed filename. The previous operational database is retained as a rollback backup.
+- `doctor --export`: write a `0600` structured diagnostic report without Memory content, repository path, database path, branch/commit values, environment variables, or credentials.
+- `uninstall --dry-run`: preview removal of managed Claude integration entries.
+- `uninstall --keep-data`: remove managed integration while retaining all Memory data.
+- `uninstall --delete-data --confirm PROJECT_ID`: move project data into recoverable user-data trash; repository config and promoted Markdown remain untouched.
+- `npm run benchmark:ga`: execute deterministic resume, retention, and hostile-content release fixtures.
+- `npm run release:macos`: build, sign, notarize, staple and verify the macOS `.pkg`; protected Apple credentials are mandatory.
+- `npm run release:macos:unsigned`: local packaging validation only and never a publishable artifact.
 
 ## MVP-0 commands
 

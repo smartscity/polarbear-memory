@@ -219,7 +219,7 @@ polarbear-memory init
 初始化结果应清晰说明：
 
 ```text
-✓ Git repository 
+✓ Git repository
 ✓ Claude Code detected
 ✓ MCP configured
 ✓ Session hooks configured

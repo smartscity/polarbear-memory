@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -51,12 +51,17 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
 
     const backup = run(process.execPath, offline(["backup"]), repository, dataDir);
     assert.match(backup.stdout, /Backup created/);
+    const backupPath = /Backup created: (.+)/u.exec(backup.stdout)?.[1]?.trim();
+    assert.ok(backupPath);
+    assert.match(run(process.execPath, offline(["backup", "list"]), repository, dataDir).stdout, /integrity=ok/);
+    assert.match(run(process.execPath, offline(["backup", "verify", backupPath]), repository, dataDir).stdout, /"integrity": "ok"/);
 
     const benchmark = run(process.execPath, offline(["benchmark", fixture]), repository, dataDir);
     assert.match(benchmark.stdout, /"passed": true/);
     const resumeSuite = run(process.execPath, offline(["benchmark", resolve("fixtures/resume-10/fixture.json")]), repository, dataDir);
     assert.match(resumeSuite.stdout, /"validPacks": 10/);
     assert.match(resumeSuite.stdout, /"medianFileReadReductionPercent": 40/);
+    assert.match(resumeSuite.stdout, /"medianTokenReductionPercent": 4[0-9]/);
     const retentionSuite = run(process.execPath, offline(["benchmark", resolve("fixtures/retention-180d/fixture.json")]), repository, dataDir);
     assert.match(retentionSuite.stdout, /"kind": "retention-suite"/);
     assert.match(retentionSuite.stdout, /"canonicalAutoPurgeCount": 0/);
@@ -83,6 +88,13 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(run(process.execPath, offline(["search", "automatic decision"]), repository, dataDir).stdout, /automatic hook decision/);
     const doctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
     assert.match(doctor.stdout, /Claude MCP\s+OK/);
+    const diagnostics = run(process.execPath, offline(["doctor", "--export"]), repository, dataDir);
+    assert.match(diagnostics.stdout, /contain no Memory content/);
+    const diagnosticsPath = /Diagnostics\s+(.+\.json)/u.exec(diagnostics.stdout)?.[1]?.trim();
+    assert.ok(diagnosticsPath && existsSync(diagnosticsPath));
+    const diagnosticsBody = readFileSync(diagnosticsPath, "utf8");
+    assert.doesNotMatch(diagnosticsBody, /Do not retry settlement|cli-e2e-session/u);
+    assert.doesNotMatch(diagnosticsBody, new RegExp(repository.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 
     const inheritedEnvironment = Object.fromEntries(
       Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -111,6 +123,13 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.equal(Buffer.concat(stderr).toString("utf8"), "");
 
     run(process.execPath, offline(["claude", "restore"]), repository, dataDir);
+    const restorePreview = run(process.execPath, offline(["backup", "restore", backupPath]), repository, dataDir);
+    const backupName = backupPath.split("/").at(-1) as string;
+    assert.match(restorePreview.stdout, new RegExp(`--confirm ${backupName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+    assert.match(run(process.execPath, offline(["backup", "restore", backupPath, "--confirm", backupName]), repository, dataDir).stdout, /Previous database preserved/);
+    run(process.execPath, offline(["claude", "install"]), repository, dataDir);
+    assert.match(run(process.execPath, offline(["uninstall", "--dry-run"]), repository, dataDir).stdout, /Dry run only/);
+    assert.match(run(process.execPath, offline(["uninstall", "--keep-data"]), repository, dataDir).stdout, /Project data preserved/);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
