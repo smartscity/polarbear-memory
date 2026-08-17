@@ -9,6 +9,7 @@ import type {
   FileAnchor,
   MaintenanceAction,
   MemoryRelationType,
+  MemoryRevision,
 } from "../domain/lifecycle.js";
 import { ASSESSOR_VERSION, POLICY_VERSION } from "../domain/lifecycle.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
@@ -435,6 +436,29 @@ export class SqliteMemoryStore implements MemoryStore {
   get(projectId: string, memoryId: string): Memory | undefined {
     const row = this.#db.prepare("SELECT * FROM memories WHERE project_id = ? AND id = ?").get(projectId, memoryId) as MemoryRow | undefined;
     return row ? this.#toMemory(row) : undefined;
+  }
+
+  revisions(projectId: string, memoryId: string): MemoryRevision[] {
+    if (!this.get(projectId, memoryId)) throw new Error(`Memory not found: ${memoryId}`);
+    const rows = this.#db.prepare(`
+      SELECT revision_no, content, summary, reason, actor_kind, created_at
+      FROM memory_revisions WHERE memory_id = ? ORDER BY revision_no DESC
+    `).all(memoryId) as Array<{
+      revision_no: number;
+      content: string;
+      summary: string;
+      reason: string;
+      actor_kind: MemoryRevision["actor"];
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      revision: row.revision_no,
+      content: row.content,
+      summary: row.summary,
+      reason: row.reason,
+      actor: row.actor_kind,
+      createdAt: row.created_at,
+    }));
   }
 
   search(projectId: string, query: string, limit: number): MemorySearchResult[] {

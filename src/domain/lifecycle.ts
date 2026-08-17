@@ -53,6 +53,15 @@ export interface LifecycleAssessment {
   assessedAt: string;
 }
 
+export interface MemoryRevision {
+  revision: number;
+  content: string;
+  summary: string;
+  reason: string;
+  actor: "HUMAN_CLI" | "AGENT_MCP" | "SYSTEM";
+  createdAt: string;
+}
+
 export interface MaintenancePlan {
   policyVersion: typeof POLICY_VERSION;
   assessorVersion: typeof ASSESSOR_VERSION;

@@ -676,11 +676,12 @@ v0.0.5 显示：
 
 v0.0.5 可以：
 
-- 查看惰性纯文本内容和关联文件。
+- 查看惰性纯文本内容、来源类型、commit/branch、关联文件、file anchor、最新 lifecycle assessment、关系和 revision audit。
 - verify、dispute、archive、restore。
+- 使用明确 reason 建立 `SUPERSEDES` / `CONTRADICTS` 关系。
 - Promote to Markdown。
 
-编辑正文、完整 evidence/revision/关系图、supersede 编辑器和 purge approval 属于后续 capability；当前 UI 不提供物理删除。
+当前 UI 不提供直接编辑正文或物理删除；Memory 内容修改仍应通过 versioned Engine API 形成 revision，purge 继续保留为独立高风险能力。
 
 ### 17.3 Context Pack Explain
 
@@ -691,7 +692,17 @@ v0.0.5 可以：
 
 逐条 ranking reason、被预算排除项和 Provider 贡献解释是下一版 explain DTO 的增量。
 
-### 17.4 Desktop 与 Engine 的关系
+### 17.4 Engine 管理
+
+Desktop 通过 Admin API 1.1 提供：
+
+- Engine/API/schema/runtime/platform diagnostics；诊断结果不包含数据库路径或 Memory 正文。
+- maintenance dry-run 预览，并在第二次明确操作后执行。
+- 创建一致性 SQLite 备份、列出备份并重新校验 integrity/SHA-256。
+
+数据库恢复暂时仍使用 Human CLI 的双阶段确认。原因是恢复需要进一步完成跨 MCP、CLI 和 Desktop writer 的 maintenance lock；在此之前不把已知的多进程一致性风险开放成 UI 按钮。
+
+### 17.5 Desktop 与 Engine 的关系
 
 ```text
 Polarbear Desktop
@@ -985,7 +996,7 @@ polarbear-memory uninstall --keep-data
 
 ### Desktop 能完全管理 Memory 吗？
 
-架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖浏览、搜索、验证/争议、可恢复归档/恢复、Context Explain 和 Promote；Human CLI 已覆盖数据库备份恢复和安全卸载。Desktop 的索引、配置、备份恢复与 purge approval 会作为后续 versioned capability 加入。
+架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖浏览、搜索、来源/evidence/revision、关系、验证/争议、可恢复归档/恢复、Context Explain、maintenance、diagnostics、一致性备份和 Promote。数据库恢复、安全卸载与 purge approval 仍由 Human CLI 承担；配置编辑和跨进程 restore lock 是剩余的 versioned capability。
 
 ### 用户需要安装 Node.js 吗？
 

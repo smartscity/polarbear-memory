@@ -1,11 +1,12 @@
 import type { LifecycleStatus, Memory, MemorySearchResult, MemoryType, RecordMemoryInput, VerificationState } from "../domain/memory.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
-import type { CompletionState, FileAnchor, MaintenanceAction, MemoryRelationType } from "../domain/lifecycle.js";
+import type { CompletionState, FileAnchor, MaintenanceAction, MemoryRelationType, MemoryRevision } from "../domain/lifecycle.js";
 
 export interface MemoryStore {
   initializeProject(project: { id: string; name: string }): void;
   record(projectId: string, input: RecordMemoryInput): Memory;
   get(projectId: string, memoryId: string): Memory | undefined;
+  revisions(projectId: string, memoryId: string): MemoryRevision[];
   search(projectId: string, query: string, limit: number): MemorySearchResult[];
   recent(projectId: string, limit: number): MemorySearchResult[];
   list(projectId: string, options: { query?: string; status?: LifecycleStatus; type?: MemoryType; limit: number; offset: number }): Memory[];

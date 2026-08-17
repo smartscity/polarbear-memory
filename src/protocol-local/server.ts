@@ -3,22 +3,33 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, 
 import { createServer, createConnection, type Server, type Socket } from "node:net";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { compileContext } from "../application/context.js";
+import { runMaintenance } from "../application/maintenance.js";
+import { inspectBackup, listBackups } from "../application/recovery.js";
 import { MVP_MEMORY_TYPES, type LifecycleStatus, type MemoryType, type VerificationState } from "../domain/memory.js";
 import { discoverGitContext } from "../platform/git.js";
-import { defaultDataRoot, loadProject } from "../platform/project.js";
-import { SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { defaultDataRoot, loadProject, readProjectPolicy, updateProjectPolicy, type CaptureMode } from "../platform/project.js";
+import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
 
-export const ADMIN_API_VERSION = "1.0";
+export const ADMIN_API_VERSION = "1.1";
 export const ENGINE_VERSION = "0.1.0";
 export const ADMIN_CAPABILITIES = [
   "projects.status",
   "memories.list",
   "memories.get",
+  "memories.history",
   "memories.verify",
   "memories.archive",
   "memories.restore",
   "memories.relate",
   "contexts.explain",
+  "projects.diagnostics",
+  "projects.config",
+  "projects.config_update",
+  "maintenance.preview",
+  "maintenance.run",
+  "backups.list",
+  "backups.create",
+  "backups.verify",
   "knowledge.promote_preview",
   "knowledge.promote",
 ] as const;
@@ -189,7 +200,7 @@ function promote(projectRoot: string, memoryId: string, expectedSha256: string, 
   return { path: plan.path, sha256: plan.sha256 };
 }
 
-function dispatch(method: string, rawParams: unknown): unknown {
+async function dispatch(method: string, rawParams: unknown): Promise<unknown> {
   const params = object(rawParams ?? {});
   if (method === "system.hello") {
     return { apiVersion: ADMIN_API_VERSION, engineVersion: ENGINE_VERSION, capabilities: ADMIN_CAPABILITIES, transport: "local-user-socket" };
@@ -200,6 +211,34 @@ function dispatch(method: string, rawParams: unknown): unknown {
       counts: store.status(project.id),
       recent: store.list(project.id, { limit: 8, offset: 0 }),
     }));
+  }
+  if (method === "projects.diagnostics") {
+    return withProject(params.projectRoot, (store, project) => ({
+      engineVersion: ENGINE_VERSION,
+      apiVersion: ADMIN_API_VERSION,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      runtime: process.version,
+      platform: process.platform,
+      architecture: process.arch,
+      networkPolicy: "disabled",
+      counts: store.status(project.id),
+    }));
+  }
+  if (method === "projects.config") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    return readProjectPolicy(project.configPath);
+  }
+  if (method === "projects.config_update") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    const captureMode = optionalText(params.captureMode, "captureMode", 16)?.toLowerCase() as CaptureMode | undefined;
+    if (captureMode && !["off", "manual", "summary"].includes(captureMode)) throw new ApiError("INVALID_ARGUMENT", "Unsupported capture mode.");
+    const retention = params.rawEventRetentionDays === undefined
+      ? undefined
+      : integer(params.rawEventRetentionDays, "rawEventRetentionDays", 7, 0, 30);
+    return updateProjectPolicy(project.configPath, {
+      ...(captureMode ? { captureMode } : {}),
+      ...(retention !== undefined ? { rawEventRetentionDays: retention } : {}),
+    });
   }
   if (method === "memories.list") {
     return withProject(params.projectRoot, (store, project) => {
@@ -226,6 +265,11 @@ function dispatch(method: string, rawParams: unknown): unknown {
       if (!memory) throw new ApiError("NOT_FOUND", "The requested Memory does not exist in this project.");
       return memory;
     });
+  }
+  if (method === "memories.history") {
+    return withProject(params.projectRoot, (store, project) => ({
+      items: store.revisions(project.id, text(params.memoryId, "memoryId", 128)),
+    }));
   }
   if (method === "memories.verify") {
     return withProject(params.projectRoot, (store, project) => {
@@ -270,6 +314,37 @@ function dispatch(method: string, rawParams: unknown): unknown {
       text(params.task, "task", 4096),
       integer(params.budget, "budget", 1000, 200, 4000),
     ));
+  }
+  if (method === "maintenance.preview" || method === "maintenance.run") {
+    return withProject(params.projectRoot, (store, project) => {
+      const git = discoverGitContext(project.root);
+      return runMaintenance(store, project.id, project.root, {
+        dryRun: method === "maintenance.preview",
+        limit: integer(params.limit, "limit", 200, 1, 1000),
+        ...(git.head ? { head: git.head } : {}),
+      });
+    });
+  }
+  if (method === "backups.list") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    return { items: listBackups(project).map(({ path: _path, ...item }) => item) };
+  }
+  if (method === "backups.verify") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    const { path: _path, ...inspection } = inspectBackup(project, text(params.fileName, "fileName", 512));
+    return inspection;
+  }
+  if (method === "backups.create") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    const destination = join(project.dataDir, "backups", `memory-${new Date().toISOString().replaceAll(":", "-")}.db`);
+    const store = new SqliteMemoryStore(project.databasePath);
+    try {
+      const pages = await store.backup(destination);
+      const { path: _path, ...inspection } = inspectBackup(project, destination);
+      return { ...inspection, pages };
+    } finally {
+      store.close();
+    }
   }
   if (method === "knowledge.promote_preview") {
     return promotionPlan(
@@ -318,7 +393,9 @@ function handleSocket(socket: Socket, token: string): void {
       const major = typeof request.apiVersion === "string" ? request.apiVersion.split(".")[0] : undefined;
       if (major !== ADMIN_API_VERSION.split(".")[0]) throw new ApiError("INCOMPATIBLE_API", `Memory Admin API ${ADMIN_API_VERSION} is required.`);
       if (typeof request.method !== "string") throw new ApiError("INVALID_REQUEST", "method is required.");
-      writeResponse(socket, { id, ok: true, result: dispatch(request.method, request.params) });
+      void dispatch(request.method, request.params)
+        .then((result) => writeResponse(socket, { id, ok: true, result }))
+        .catch((error: unknown) => writeResponse(socket, { id, ok: false, error: safeError(error) }));
     } catch (error) {
       writeResponse(socket, { id, ok: false, error: safeError(error) });
     }

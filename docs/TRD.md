@@ -1612,7 +1612,7 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 - Context Pack explain。
 - Desktop 与 Engine capability negotiation。
 
-实现状态（v0.0.5）：以上可运行工程闭环已完成；Timeline 由按 `updated_at` 倒序且可筛选/搜索的列表提供，Forget 对应可恢复的 archive。真实用户是否持续使用 Viewer、纠错率是否提高、durable knowledge 产出是否增加，仍必须通过产品试用数据验证，不能由自动化测试替代。
+实现状态（v0.0.5）：可运行工程闭环已完成；Admin API 1.1 提供来源/evidence/revision、关系、Context Explain、maintenance preview/apply、脱敏 diagnostics 和一致性备份创建/校验。Timeline 由按 `updated_at` 倒序且可筛选/搜索的列表提供，Forget 对应可恢复的 archive。数据库 restore UI 等待跨进程 maintenance lock，不在存在已知 writer 一致性风险时开放。真实用户是否持续使用 Viewer、纠错率是否提高、durable knowledge 产出是否增加，仍必须通过产品试用数据验证，不能由自动化测试替代。
 
 可运行演示：
 

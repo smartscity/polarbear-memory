@@ -7,7 +7,7 @@ import { finalizeSessionEvents } from "../application/finalization.js";
 import { runMaintenance } from "../application/maintenance.js";
 import type { EventEnvelope } from "../domain/event.js";
 import { discoverGitContext } from "../platform/git.js";
-import { loadProject, type ProjectBinding } from "../platform/project.js";
+import { loadProject, readProjectPolicy, type ProjectBinding, type ProjectPolicy } from "../platform/project.js";
 import { redactText } from "../security/redaction.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 
@@ -45,7 +45,7 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function makeEnvelope(project: ProjectBinding, raw: z.infer<typeof HookInput>, now: Date): EventEnvelope {
+function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.infer<typeof HookInput>, now: Date): EventEnvelope {
   const eventType = raw.hook_event_name === "Stop" ? "CLAUDE_STOP" : "CLAUDE_SESSION_END";
   const payload: Record<string, string | boolean> = raw.hook_event_name === "Stop"
     ? {
@@ -66,7 +66,7 @@ function makeEnvelope(project: ProjectBinding, raw: z.infer<typeof HookInput>, n
     payload,
     payloadDigest,
     occurredAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+    expiresAt: new Date(now.getTime() + policy.rawEventRetentionDays * 24 * 60 * 60 * 1_000).toISOString(),
     ingestionVersion: 1,
   };
 }
@@ -124,12 +124,15 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
   const inputGit = discoverGitContext(parsed.cwd);
   if (currentGit.root !== inputGit.root) throw new Error("Hook cwd does not match the bound project.");
   const project = loadProject(currentGit);
-  const envelope = makeEnvelope(project, parsed, now);
+  const policy = readProjectPolicy(project.configPath);
+  if (policy.captureMode === "off" || policy.captureMode === "manual") {
+    return { accepted: false, spooled: false, finalized: 0 };
+  }
+  const envelope = makeEnvelope(project, policy, parsed, now);
   let store: SqliteMemoryStore | undefined;
   try {
     store = new SqliteMemoryStore(project.databasePath, { busyTimeoutMs: 100 });
     store.initializeProject(project);
-    store.deleteExpiredRawEvents(project.id, now.toISOString());
     const replayed = replaySpool(project, store);
     for (const sessionRefHash of new Set([...replayed.endedSessions, ...store.pendingEndedSessions(project.id)])) {
       finalizeSessionEvents(store, project.id, sessionRefHash, {
@@ -155,6 +158,9 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
       } catch {
         // Lifecycle maintenance must not make a SessionEnd hook blocking or fatal.
       }
+    }
+    if (policy.rawEventRetentionDays > 0 || envelope.eventType === "CLAUDE_SESSION_END") {
+      store.deleteExpiredRawEvents(project.id, now.toISOString());
     }
     return { accepted, spooled: false, finalized };
   } catch (error) {

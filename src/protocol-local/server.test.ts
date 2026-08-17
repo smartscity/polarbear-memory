@@ -109,7 +109,7 @@ test("rejects incompatible API major versions without leaking local paths", asyn
   const token = readFileSync(handle.paths.token, "utf8").trim();
   const response = await request(handle, { id: "6", apiVersion: "2.0", token, method: "projects.status", params: { projectRoot: fixture.root } });
   assert.equal(response.ok, false);
-  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: "Memory Admin API 1.0 is required." });
+  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: "Memory Admin API 1.1 is required." });
   assert.doesNotMatch(JSON.stringify(response), new RegExp(fixture.root.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });
 
@@ -138,6 +138,64 @@ test("promotes only after an unchanged explicit preview", async () => {
   });
   assert.equal(written.ok, true);
   assert.equal(readFileSync(join(fixture.root, plan.path), "utf8"), plan.content);
+});
+
+test("exposes revision history, explainable maintenance, diagnostics and safe backup operations", async () => {
+  const fixture = repository();
+  const handle = await startAdminApi(fixture.dataRoot);
+  handles.push(handle);
+  const token = readFileSync(handle.paths.token, "utf8").trim();
+  const listed = await request(handle, {
+    id: "admin-1", apiVersion: ADMIN_API_VERSION, token, method: "memories.list", params: { projectRoot: fixture.root },
+  });
+  const memoryId = (listed.result as { items: Array<{ id: string }> }).items[0]?.id;
+  assert.ok(memoryId);
+
+  const history = await request(handle, {
+    id: "admin-2", apiVersion: ADMIN_API_VERSION, token, method: "memories.history",
+    params: { projectRoot: fixture.root, memoryId },
+  });
+  assert.equal((history.result as { items: unknown[] }).items.length, 1);
+
+  const diagnostics = await request(handle, {
+    id: "admin-3", apiVersion: ADMIN_API_VERSION, token, method: "projects.diagnostics", params: { projectRoot: fixture.root },
+  });
+  assert.equal((diagnostics.result as { networkPolicy: string }).networkPolicy, "disabled");
+  assert.doesNotMatch(JSON.stringify(diagnostics.result), /memory\.db|projectRoot/u);
+  const configured = await request(handle, {
+    id: "admin-config-1", apiVersion: ADMIN_API_VERSION, token, method: "projects.config_update",
+    params: { projectRoot: fixture.root, captureMode: "manual", rawEventRetentionDays: 3 },
+  });
+  assert.deepEqual(configured.result, { captureMode: "manual", rawEventRetentionDays: 3, defaultContextBudget: 1000 });
+  const readConfig = await request(handle, {
+    id: "admin-config-2", apiVersion: ADMIN_API_VERSION, token, method: "projects.config", params: { projectRoot: fixture.root },
+  });
+  assert.deepEqual(readConfig.result, configured.result);
+
+  const preview = await request(handle, {
+    id: "admin-4", apiVersion: ADMIN_API_VERSION, token, method: "maintenance.preview", params: { projectRoot: fixture.root },
+  });
+  assert.equal((preview.result as { dryRun: boolean }).dryRun, true);
+  const maintained = await request(handle, {
+    id: "admin-5", apiVersion: ADMIN_API_VERSION, token, method: "maintenance.run", params: { projectRoot: fixture.root },
+  });
+  assert.equal((maintained.result as { dryRun: boolean }).dryRun, false);
+
+  const created = await request(handle, {
+    id: "admin-6", apiVersion: ADMIN_API_VERSION, token, method: "backups.create", params: { projectRoot: fixture.root },
+  });
+  const backup = created.result as { fileName: string; integrity: string; sha256: string };
+  assert.equal(backup.integrity, "ok");
+  assert.match(backup.sha256, /^[a-f0-9]{64}$/u);
+  const backups = await request(handle, {
+    id: "admin-7", apiVersion: ADMIN_API_VERSION, token, method: "backups.list", params: { projectRoot: fixture.root },
+  });
+  assert.equal((backups.result as { items: Array<{ fileName: string }> }).items[0]?.fileName, backup.fileName);
+  const verified = await request(handle, {
+    id: "admin-8", apiVersion: ADMIN_API_VERSION, token, method: "backups.verify",
+    params: { projectRoot: fixture.root, fileName: backup.fileName },
+  });
+  assert.equal((verified.result as { sha256: string }).sha256, backup.sha256);
 });
 
 test("handles concurrent local reads and keeps hello p95 below 200 ms", async () => {

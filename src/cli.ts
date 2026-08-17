@@ -89,7 +89,7 @@ function init(cwd: string, args: string[]): void {
   } finally {
     store.close();
   }
-  console.log("\nPolarbear Memory is ready (manual capture mode).");
+  console.log("\nPolarbear Memory is ready (summary capture mode).");
 }
 
 function record(cwd: string, args: string[]): void {

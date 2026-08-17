@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, test } from "node:test";
 import { discoverGitContext } from "../platform/git.js";
-import { planProject, writeProjectConfig } from "../platform/project.js";
+import { planProject, updateProjectPolicy, writeProjectConfig } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { ingestClaudeHook, replayProjectSpool } from "./hooks.js";
 
@@ -154,6 +154,46 @@ test("raw hook events expire after seven days even when SessionEnd never arrives
       const hash = (session: string) => createHash("sha256").update(session).digest("hex");
       assert.equal(store.unprocessedRawEvents(project.id, hash("abandoned-session")).length, 0);
       assert.equal(store.unprocessedRawEvents(project.id, hash("current-session")).length, 1);
+    } finally {
+      store.close();
+    }
+  } finally {
+    restoreEnvironment();
+  }
+});
+
+test("capture policy disables hooks and controls raw-event retention", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  try {
+    updateProjectPolicy(project.configPath, { captureMode: "off" });
+    assert.deepEqual(ingestClaudeHook(stopInput(root, "off-session"), root), { accepted: false, spooled: false, finalized: 0 });
+    updateProjectPolicy(project.configPath, { captureMode: "summary", rawEventRetentionDays: 1 });
+    ingestClaudeHook(stopInput(root, "short-retention"), root, new Date("2026-01-01T00:00:00.000Z"));
+    ingestClaudeHook(stopInput(root, "current-retention"), root, new Date("2026-01-03T00:00:00.000Z"));
+    const store = new SqliteMemoryStore(project.databasePath);
+    try {
+      const hash = createHash("sha256").update("short-retention").digest("hex");
+      assert.equal(store.unprocessedRawEvents(project.id, hash).length, 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    restoreEnvironment();
+  }
+});
+
+test("zero-day retention keeps Stop until SessionEnd finalization and then removes raw events", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  try {
+    updateProjectPolicy(project.configPath, { captureMode: "summary", rawEventRetentionDays: 0 });
+    ingestClaudeHook({ ...stopInput(root, "ephemeral"), last_assistant_message: "Decision: Finalize before zero-day cleanup." }, root, new Date("2026-01-01T00:00:00.000Z"));
+    const ended = ingestClaudeHook(endInput(root, "ephemeral"), root, new Date("2026-01-01T00:01:00.000Z"));
+    assert.equal(ended.finalized, 1);
+    const store = new SqliteMemoryStore(project.databasePath);
+    try {
+      const hash = createHash("sha256").update("ephemeral").digest("hex");
+      assert.equal(store.unprocessedRawEvents(project.id, hash).length, 0);
+      assert.equal(store.search(project.id, "zero-day cleanup", 10).length, 1);
     } finally {
       store.close();
     }
