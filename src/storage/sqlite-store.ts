@@ -696,6 +696,22 @@ export class SqliteMemoryStore implements MemoryStore {
     const source = this.get(projectId, sourceMemoryId);
     const target = this.get(projectId, targetMemoryId);
     if (!source || !target) throw new Error("Both related Memory records must exist in this project.");
+    if (type === "SUPERSEDES") {
+      const cycle = this.#db.prepare(`
+        WITH RECURSIVE superseded(memory_id) AS (
+          SELECT target_memory_id
+          FROM memory_relations
+          WHERE source_memory_id = ? AND relation_type = 'SUPERSEDES'
+          UNION
+          SELECT relation.target_memory_id
+          FROM memory_relations relation
+          JOIN superseded ON relation.source_memory_id = superseded.memory_id
+          WHERE relation.relation_type = 'SUPERSEDES'
+        )
+        SELECT 1 AS found FROM superseded WHERE memory_id = ? LIMIT 1
+      `).get(targetMemoryId, sourceMemoryId) as { found: number } | undefined;
+      if (cycle) throw new Error("A SUPERSEDES relation cannot create a cycle.");
+    }
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {

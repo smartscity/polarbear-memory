@@ -4,7 +4,21 @@
 > **文档版本**：v1.0 Draft
 > **文档日期**：2026-08-16
 > **对应设计**：`TRD.md` 第 11 节“四层知识淘汰机制”
-> **状态**：产品实现前验证规格；命令、fixture 和报告格式是开发验收契约
+> **状态**：MVP-3 自动化验收已落地；真实 Agent 对照实验、4 周 dogfood 和扩展类型矩阵仍是外部验证门槛
+
+### 当前自动化覆盖（2026-08-17）
+
+| 验证范围 | 自动化入口 | 状态 |
+| --- | --- | --- |
+| stale、反馈不能洗白 stale、无关文件变化 | `src/application/retention-validation.test.ts` 7.1 | 已覆盖 |
+| conflict preservation、supersession、一致性、幂等与无环 | `src/application/retention-validation.test.ts` 7.2 | 已覆盖 |
+| TASK_STATE 单活跃、完成项退出、长期 DECISION/PITFALL 保护、精确去重 | `src/application/retention-validation.test.ts` 7.3 | 已覆盖 |
+| dry-run/apply、reason/policy/assessor、archive restore、无自动 purge | `src/application/retention-validation.test.ts` 7.4 | 已覆盖 |
+| 180 天增长、低频 PITFALL、污染与归档 precision proxy | `src/application/benchmark.test.ts` + `fixtures/retention-180d` | 已覆盖 |
+| 10k incremental maintenance 与 context/search 性能 | `src/application/maintenance.test.ts` | 已覆盖 |
+| Agent MCP 无物理 purge、恶意 Memory 为惰性数据 | `src/protocol-mcp/server.test.ts` + security fixture | 已覆盖 |
+
+当前 MVP 类型只有 `DECISION / PITFALL / TASK_STATE / TODO`。本方案中的 `FACT / ARCHITECTURE / CONVENTION / FAILURE / WORKAROUND / PREFERENCE / CANDIDATE` 不应伪装成已有覆盖；需要先通过独立 schema/API 演进评审，再启用对应验收行。
 
 ## 1. 验证目标
 
@@ -334,15 +348,27 @@ maintenance_duration_ms
 
 ## 11. 可运行接口约定
 
-MVP-3 应提供以下测试入口；名称可在实现时调整，但能力不能缺失：
+### 11.1 当前可运行入口
 
 ```bash
-# 查看计划，不修改数据
-polarbear-memory maintain --dry-run --explain
+# 完整自动化回归（包含四层机制、fixture、MCP 和本地 Admin API）
+npm test
 
-# 在 fixture 的可控时钟下运行维护
-polarbear-memory maintain --now 2026-08-16T00:00:00Z
+# 只运行验证方案 7.1–7.4
+npm run build
+node --test --test-concurrency=1 dist/application/retention-validation.test.js
 
+# 运行 GA fixture 汇总门槛
+npm run benchmark:ga
+```
+
+测试使用 application 层的显式 `now` 注入可控时钟；生产 CLI 不开放伪造时间。
+
+### 11.2 后续 benchmark/report 契约
+
+以下多 treatment 报告接口尚未实现，保留为真实对照实验和报告流水线契约：
+
+```bash
 # 运行四层机制测试集
 polarbear-memory benchmark fixtures/retention-180d \
   --treatments no-retirement,naive-ttl,four-layer \
@@ -354,7 +380,7 @@ polarbear-memory benchmark report \
   --format markdown
 ```
 
-生产 CLI 不应允许普通用户伪造时间；`--now` 只在 test build 或显式 fixture mode 可用。
+生产 CLI 不应允许普通用户伪造时间；未来如增加 `--now`，只能在 test build 或显式 fixture mode 可用。
 
 ## 12. 报告格式
 
