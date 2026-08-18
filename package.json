@@ -21,6 +21,7 @@
     "dependencies:check": "node scripts/runtime-audit.mjs",
     "bundle:audit": "npm run build && node scripts/runtime-audit.mjs --scan-dist",
     "format:check": "node scripts/format-check.mjs",
+    "admin-contract:check": "node scripts/check-admin-contract.mjs",
     "lint": "npm run typecheck && node scripts/runtime-audit.mjs --scan-source",
     "advisories:check": "npm audit --audit-level=high",
     "sbom:generate": "node scripts/generate-sbom.mjs",
@@ -28,7 +29,7 @@
     "benchmark:ga": "npm run build && node scripts/ga-readiness.mjs",
     "release:macos": "node scripts/build-macos-release.mjs",
     "release:macos:unsigned": "node scripts/build-macos-release.mjs --unsigned",
-    "check": "npm run format:check && npm run lint && npm test && npm run licenses:check && npm run dependencies:check && npm run bundle:audit && npm run sbom:check && npm run benchmark:ga",
+    "check": "npm run format:check && npm run lint && npm run admin-contract:check && npm test && npm run licenses:check && npm run dependencies:check && npm run bundle:audit && npm run sbom:check && npm run benchmark:ga",
     "release:check": "npm ci --ignore-scripts && npm run check && npm run advisories:check"
   },
   "devDependencies": {

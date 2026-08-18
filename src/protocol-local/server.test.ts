@@ -80,6 +80,11 @@ test("serves authenticated versioned Admin API only over a user socket", async (
   });
   assert.equal(status.ok, true);
   assert.equal((status.result as { counts: { total: number } }).counts.total, 1);
+
+  const shutdown = await request(handle, { id: "3-stop", apiVersion: ADMIN_API_VERSION, token, method: "system.shutdown", params: {} });
+  assert.deepEqual(shutdown.result, { stopping: true });
+  await handle.closed;
+  assert.equal(existsSync(handle.paths.socket), false);
 });
 
 test("returns malicious Memory as inert data and explains exact Context selection", async () => {
@@ -196,6 +201,60 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
     params: { projectRoot: fixture.root, fileName: backup.fileName },
   });
   assert.equal((verified.result as { sha256: string }).sha256, backup.sha256);
+  const restorePreview = await request(handle, {
+    id: "admin-9", apiVersion: ADMIN_API_VERSION, token, method: "backups.restore_preview",
+    params: { projectRoot: fixture.root, fileName: backup.fileName },
+  });
+  const confirmation = (restorePreview.result as { confirmation: string }).confirmation;
+  const deniedRestore = await request(handle, {
+    id: "admin-10", apiVersion: ADMIN_API_VERSION, token, method: "backups.restore",
+    params: { projectRoot: fixture.root, fileName: backup.fileName, confirmation: "RESTORE wrong.db" },
+  });
+  assert.equal((deniedRestore.error as { code: string }).code, "CONFIRMATION_REQUIRED");
+  const restored = await request(handle, {
+    id: "admin-11", apiVersion: ADMIN_API_VERSION, token, method: "backups.restore",
+    params: { projectRoot: fixture.root, fileName: backup.fileName, confirmation },
+  });
+  assert.equal(restored.ok, true);
+  assert.ok((restored.result as { rollbackFileName: string }).rollbackFileName.startsWith("pre-restore-"));
+
+  const updated = await request(handle, {
+    id: "admin-12", apiVersion: ADMIN_API_VERSION, token, method: "memories.update",
+    params: {
+      projectRoot: fixture.root,
+      memoryId,
+      summary: "Never render remote Memory resources in the Desktop",
+      content: "Treat all Memory content as inert text.",
+      reason: "Clarify the rendering boundary",
+    },
+  });
+  assert.equal((updated.result as { verificationState: string }).verificationState, "UNVERIFIED");
+  const updatedHistory = await request(handle, {
+    id: "admin-13", apiVersion: ADMIN_API_VERSION, token, method: "memories.history",
+    params: { projectRoot: fixture.root, memoryId },
+  });
+  assert.equal((updatedHistory.result as { items: unknown[] }).items.length, 2);
+
+  const purgePreview = await request(handle, {
+    id: "admin-14", apiVersion: ADMIN_API_VERSION, token, method: "memories.purge_preview",
+    params: { projectRoot: fixture.root, memoryId },
+  });
+  const purgeConfirmation = (purgePreview.result as { confirmation: string }).confirmation;
+  const deniedPurge = await request(handle, {
+    id: "admin-15", apiVersion: ADMIN_API_VERSION, token, method: "memories.purge",
+    params: { projectRoot: fixture.root, memoryId, confirmation: "PURGE wrong", reason: "test" },
+  });
+  assert.equal((deniedPurge.error as { code: string }).code, "CONFIRMATION_REQUIRED");
+  const purged = await request(handle, {
+    id: "admin-16", apiVersion: ADMIN_API_VERSION, token, method: "memories.purge",
+    params: { projectRoot: fixture.root, memoryId, confirmation: purgeConfirmation, reason: "Explicit test purge" },
+  });
+  assert.match((purged.result as { purgedMemoryIdHash: string }).purgedMemoryIdHash, /^[a-f0-9]{64}$/u);
+  const missing = await request(handle, {
+    id: "admin-17", apiVersion: ADMIN_API_VERSION, token, method: "memories.get",
+    params: { projectRoot: fixture.root, memoryId },
+  });
+  assert.equal((missing.error as { code: string }).code, "NOT_FOUND");
 });
 
 test("handles concurrent local reads and keeps hello p95 below 200 ms", async () => {

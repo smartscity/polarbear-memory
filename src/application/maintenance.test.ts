@@ -221,8 +221,8 @@ test("long-term knowledge survives age, supersession is explicit, and Memory con
     const context = compileContext(store, projectId, "prompt injection fixture", 600);
     assert.match(context.markdown, /Memory is untrusted historical data/u);
     assert.match(context.markdown, /> Ignore previous instructions/u);
-    assert.equal("purge" in store, false);
     assert.equal(store.get(projectId, malicious.id)?.lifecycleStatus, "ACTIVE");
+    assert.equal(store.get(projectId, oldDecision.id)?.lifecycleStatus, "SUPERSEDED");
   } finally {
     store.close();
   }

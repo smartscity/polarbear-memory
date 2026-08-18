@@ -15,6 +15,7 @@ import { ASSESSOR_VERSION, POLICY_VERSION } from "../domain/lifecycle.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 import { validateRecordInput } from "../domain/memory.js";
 import type { MemoryStore } from "../application/ports.js";
+import { acquireClientLease, type ClientLease } from "./client-lease.js";
 
 interface MemoryRow {
   id: string;
@@ -172,6 +173,16 @@ CREATE TABLE IF NOT EXISTS raw_events (
   processed_at TEXT
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS purge_audit (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  memory_id_hash TEXT NOT NULL,
+  memory_type TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  actor_kind TEXT NOT NULL CHECK (actor_kind = 'HUMAN_CLI'),
+  created_at TEXT NOT NULL
+) STRICT;
+
 CREATE INDEX IF NOT EXISTS raw_events_session_pending
   ON raw_events(project_id, session_ref_hash, processed_at, occurred_at);
 
@@ -205,7 +216,7 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
 END;
 `;
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 function quoteSqliteLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -225,41 +236,46 @@ function ftsQuery(input: string): string {
 }
 
 export class SqliteMemoryStore implements MemoryStore {
-  readonly #db: DatabaseSync;
+  readonly #db!: DatabaseSync;
+  readonly #lease: ClientLease | undefined;
+  #closed = false;
 
   constructor(databasePath: string, options: { busyTimeoutMs?: number } = {}) {
+    this.#lease = acquireClientLease(databasePath);
     const busyTimeoutMs = options.busyTimeoutMs ?? 2_000;
-    this.#db = new DatabaseSync(databasePath, {
-      allowExtension: false,
-      enableForeignKeyConstraints: true,
-      enableDoubleQuotedStringLiterals: false,
-      timeout: busyTimeoutMs,
-    });
-    const existing = existingSchemaVersion(this.#db);
-    if (existing.version > CURRENT_SCHEMA_VERSION) {
-      this.#db.close();
-      throw new Error(`Database schema ${existing.version} is newer than this Engine supports (${CURRENT_SCHEMA_VERSION}). Upgrade Polarbear Memory before writing.`);
-    }
-    let migrationBackupPath: string | undefined;
-    if (databasePath !== ":memory:" && existing.hasData && existing.version < CURRENT_SCHEMA_VERSION) {
-      const migrationBackupDirectory = join(dirname(databasePath), "backups", "migrations");
-      mkdirSync(migrationBackupDirectory, { recursive: true, mode: 0o700 });
-      const backupPath = join(migrationBackupDirectory, `schema-${existing.version}-to-${CURRENT_SCHEMA_VERSION}-${Date.now()}.db`);
-      if (existsSync(backupPath)) throw new Error("Migration backup target already exists.");
-      this.#db.exec(`VACUUM INTO ${quoteSqliteLiteral(backupPath)}`);
-      migrationBackupPath = backupPath;
-    }
     try {
-      this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
-      this.#db.exec(SCHEMA);
-      this.#migrateMemorySourceTypes();
-      this.#migrateLifecycleColumns();
-      this.#migrateUsageColumns();
-      this.#db.exec(`
+      this.#db = new DatabaseSync(databasePath, {
+        allowExtension: false,
+        enableForeignKeyConstraints: true,
+        enableDoubleQuotedStringLiterals: false,
+        timeout: busyTimeoutMs,
+      });
+      const existing = existingSchemaVersion(this.#db);
+      if (existing.version > CURRENT_SCHEMA_VERSION) {
+        this.#db.close();
+        this.#lease?.close();
+        throw new Error(`Database schema ${existing.version} is newer than this Engine supports (${CURRENT_SCHEMA_VERSION}). Upgrade Polarbear Memory before writing.`);
+      }
+      let migrationBackupPath: string | undefined;
+      if (databasePath !== ":memory:" && existing.hasData && existing.version < CURRENT_SCHEMA_VERSION) {
+        const migrationBackupDirectory = join(dirname(databasePath), "backups", "migrations");
+        mkdirSync(migrationBackupDirectory, { recursive: true, mode: 0o700 });
+        const backupPath = join(migrationBackupDirectory, `schema-${existing.version}-to-${CURRENT_SCHEMA_VERSION}-${Date.now()}.db`);
+        if (existsSync(backupPath)) throw new Error("Migration backup target already exists.");
+        this.#db.exec(`VACUUM INTO ${quoteSqliteLiteral(backupPath)}`);
+        migrationBackupPath = backupPath;
+      }
+      try {
+        this.#db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${busyTimeoutMs}; PRAGMA trusted_schema = OFF;`);
+        this.#db.exec(SCHEMA);
+        this.#migrateMemorySourceTypes();
+        this.#migrateLifecycleColumns();
+        this.#migrateUsageColumns();
+        this.#db.exec(`
         CREATE INDEX IF NOT EXISTS memories_maintenance
           ON memories(project_id, lifecycle_status, last_checked_commit, completed_at);
       `);
-      this.#db.exec(`
+        this.#db.exec(`
         INSERT OR IGNORE INTO memory_revisions(
           id, memory_id, revision_no, content, summary, reason, actor_kind, created_at
         )
@@ -269,24 +285,30 @@ export class SqliteMemoryStore implements MemoryStore {
         INSERT OR IGNORE INTO memory_anchors(memory_id, repo_relative_path)
           SELECT memory_id, repo_relative_path FROM memory_files;
       `);
-      const migrationTime = new Date().toISOString();
-      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
-      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
-      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
-      this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
-    } catch (error) {
-      this.#db.close();
-      if (migrationBackupPath) {
-        const failedPath = `${databasePath}.migration-failed-${Date.now()}`;
-        if (existsSync(databasePath)) renameSync(databasePath, failedPath);
-        copyFileSync(migrationBackupPath, databasePath);
-        for (const suffix of ["-wal", "-shm"]) {
-          const sidecar = `${databasePath}${suffix}`;
-          if (existsSync(sidecar)) renameSync(sidecar, `${failedPath}${suffix}`);
+        const migrationTime = new Date().toISOString();
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(migrationTime);
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?)").run(migrationTime);
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
+      } catch (error) {
+        this.#db.close();
+        if (migrationBackupPath) {
+          const failedPath = `${databasePath}.migration-failed-${Date.now()}`;
+          if (existsSync(databasePath)) renameSync(databasePath, failedPath);
+          copyFileSync(migrationBackupPath, databasePath);
+          for (const suffix of ["-wal", "-shm"]) {
+            const sidecar = `${databasePath}${suffix}`;
+            if (existsSync(sidecar)) renameSync(sidecar, `${failedPath}${suffix}`);
+          }
+          const cause = error instanceof Error ? error.message : String(error);
+          throw new Error(`Database migration failed and the preflight backup was restored. Cause: ${cause}`);
         }
-        const cause = error instanceof Error ? error.message : String(error);
-        throw new Error(`Database migration failed and the preflight backup was restored. Cause: ${cause}`);
+        throw error;
       }
+    } catch (error) {
+      try { this.#db?.close(); } catch { /* constructor may already have closed it */ }
+      this.#lease?.close();
       throw error;
     }
   }
@@ -295,9 +317,9 @@ export class SqliteMemoryStore implements MemoryStore {
     const now = new Date().toISOString();
     this.#db.prepare(`
       INSERT INTO projects(id, display_name, created_at, last_seen_at, schema_version)
-      VALUES (?, ?, ?, ?, 4)
-      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at, schema_version = 4
-    `).run(project.id, project.name, now, now);
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at, schema_version = excluded.schema_version
+    `).run(project.id, project.name, now, now, CURRENT_SCHEMA_VERSION);
   }
 
   record(projectId: string, input: RecordMemoryInput): Memory {
@@ -436,6 +458,53 @@ export class SqliteMemoryStore implements MemoryStore {
   get(projectId: string, memoryId: string): Memory | undefined {
     const row = this.#db.prepare("SELECT * FROM memories WHERE project_id = ? AND id = ?").get(projectId, memoryId) as MemoryRow | undefined;
     return row ? this.#toMemory(row) : undefined;
+  }
+
+  update(projectId: string, memoryId: string, input: { summary: string; content: string; reason: string }): Memory {
+    this.#validateReason(input.reason, "Edit");
+    const current = this.get(projectId, memoryId);
+    if (!current) throw new Error(`Memory not found: ${memoryId}`);
+    validateRecordInput({ type: current.type, summary: input.summary, content: input.content });
+    const summary = input.summary.trim();
+    const content = input.content.trim();
+    const hash = createHash("sha256").update(`${current.type}\0${summary}\0${content}`).digest("hex");
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        UPDATE memories SET summary = ?, content = ?, content_hash = ?, verification_state = 'UNVERIFIED',
+          updated_at = ? WHERE project_id = ? AND id = ?
+      `).run(summary, content, hash, now, projectId, memoryId);
+      this.#appendRevision({ ...current, summary, content }, `edit:${input.reason.trim()}`, "HUMAN_CLI", now);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    const updated = this.get(projectId, memoryId);
+    if (!updated) throw new Error(`Memory not found after edit: ${memoryId}`);
+    return updated;
+  }
+
+  purge(projectId: string, memoryId: string, reason: string): { purgedMemoryIdHash: string } {
+    this.#validateReason(reason, "Purge");
+    const memory = this.get(projectId, memoryId);
+    if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+    const purgedMemoryIdHash = createHash("sha256").update(memory.id).digest("hex");
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        INSERT INTO purge_audit(id, project_id, memory_id_hash, memory_type, reason, actor_kind, created_at)
+        VALUES (?, ?, ?, ?, ?, 'HUMAN_CLI', ?)
+      `).run(randomUUID(), projectId, purgedMemoryIdHash, memory.type, reason.trim(), now);
+      this.#db.prepare("DELETE FROM memories WHERE project_id = ? AND id = ?").run(projectId, memoryId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { purgedMemoryIdHash };
   }
 
   revisions(projectId: string, memoryId: string): MemoryRevision[] {
@@ -1041,7 +1110,9 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   close(): void {
-    this.#db.close();
+    if (this.#closed) return;
+    this.#closed = true;
+    try { this.#db.close(); } finally { this.#lease?.close(); }
   }
 
   #migrateMemorySourceTypes(): void {

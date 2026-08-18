@@ -656,9 +656,9 @@ v0.0.5 的可运行入口是在打开 Git 工作区后点击侧边栏的“记�
 Memory
 ├── Overview counts
 ├── Timeline / Search / lifecycle filters
-├── Detail / Verify / Dispute / Archive / Restore
+├── Detail / Edit / Revision / Verify / Dispute / Archive / Restore / Purge
 ├── Context Pack Explain
-└── Promote preview / Confirm
+└── Engine service / Config / Maintenance / Backup / Restore / Promote
 ```
 
 ### 17.1 Overview
@@ -679,9 +679,9 @@ v0.0.5 可以：
 - 查看惰性纯文本内容、来源类型、commit/branch、关联文件、file anchor、最新 lifecycle assessment、关系和 revision audit。
 - verify、dispute、archive、restore。
 - 使用明确 reason 建立 `SUPERSEDES` / `CONTRADICTS` 关系。
+- 编辑摘要和正文；每次编辑形成新 revision，并把 verification 重置为 `UNVERIFIED`。
+- 预览永久清除影响范围，输入精确 `PURGE <memory-id>` 和理由后执行；正文、revision、anchor 和 relation 删除，只留下不含正文的哈希审计墓碑。
 - Promote to Markdown。
-
-当前 UI 不提供直接编辑正文或物理删除；Memory 内容修改仍应通过 versioned Engine API 形成 revision，purge 继续保留为独立高风险能力。
 
 ### 17.3 Context Pack Explain
 
@@ -698,9 +698,13 @@ Desktop 通过 Admin API 1.1 提供：
 
 - Engine/API/schema/runtime/platform diagnostics；诊断结果不包含数据库路径或 Memory 正文。
 - maintenance dry-run 预览，并在第二次明确操作后执行。
+- 查看、启动和优雅停止本地 Engine service；停止 Desktop 不会删除数据，CLI/MCP 仍可独立启动 Engine。
+- 编辑 capture mode 和 raw-event retention。
 - 创建一致性 SQLite 备份、列出备份并重新校验 integrity/SHA-256。
+- 先预览数据库恢复，再输入精确 `RESTORE <backup-file>`；Engine 获取跨进程 maintenance lock、拒绝活跃 writer，并保留恢复前 rollback backup。
+- 显示 Engine 版本与 API capability。更新不主动联网检查，仍通过签名、公证的离线发行包完成。
 
-数据库恢复暂时仍使用 Human CLI 的双阶段确认。原因是恢复需要进一步完成跨 MCP、CLI 和 Desktop writer 的 maintenance lock；在此之前不把已知的多进程一致性风险开放成 UI 按钮。
+Desktop 的 Rust 代理先绑定当前已初始化 Git workspace；之后只接受同一 canonical workspace 的 allowlisted 请求。WebView 不持有 service token，也不能指定数据库路径。
 
 ### 17.5 Desktop 与 Engine 的关系
 
@@ -996,7 +1000,7 @@ polarbear-memory uninstall --keep-data
 
 ### Desktop 能完全管理 Memory 吗？
 
-架构目标是能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖浏览、搜索、来源/evidence/revision、关系、验证/争议、可恢复归档/恢复、Context Explain、maintenance、diagnostics、一致性备份和 Promote。数据库恢复、安全卸载与 purge approval 仍由 Human CLI 承担；配置编辑和跨进程 restore lock 是剩余的 versioned capability。
+能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖浏览、搜索、来源/evidence/revision、内容编辑、关系、验证/争议、可恢复归档/恢复、明确批准的永久 purge、Context Explain、capture/retention 配置、maintenance、diagnostics、一致性备份/校验/恢复、Engine service 生命周期和 Promote。整个产品数据目录的安全卸载仍由 Human CLI 承担，因为它超出单一项目面板的作用域。
 
 ### 用户需要安装 Node.js 吗？
 

@@ -163,6 +163,47 @@ test("refuses to open a database created by a newer Engine", () => {
   assert.throws(() => new SqliteMemoryStore(path), /newer than this Engine supports/);
 });
 
+test("edits create an auditable revision and physical purge keeps a tombstone audit", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-edit-purge-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const projectId = "44444444-4444-4444-8444-444444444444";
+  const store = new SqliteMemoryStore(path);
+  store.initializeProject({ id: projectId, name: "fixture" });
+  const memory = store.record(projectId, { type: "DECISION", summary: "Use the old API", content: "Original rationale." });
+
+  const updated = store.update(projectId, memory.id, {
+    summary: "Use the local Admin API",
+    content: "The Desktop must communicate through the Engine.",
+    reason: "Architecture decision was refined",
+  });
+  assert.equal(updated.summary, "Use the local Admin API");
+  assert.equal(updated.verificationState, "UNVERIFIED");
+  const revisions = store.revisions(projectId, memory.id);
+  assert.equal(revisions.length, 2);
+  assert.equal(revisions[0]?.reason, "edit:Architecture decision was refined");
+
+  const purged = store.purge(projectId, memory.id, "User explicitly requested permanent deletion");
+  assert.match(purged.purgedMemoryIdHash, /^[a-f0-9]{64}$/u);
+  assert.equal(store.get(projectId, memory.id), undefined);
+  store.close();
+
+  const audit = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = audit.prepare("SELECT memory_id_hash, reason, actor_kind FROM purge_audit").get() as {
+      memory_id_hash: string; reason: string; actor_kind: string;
+    };
+    assert.deepEqual({ ...row }, {
+      memory_id_hash: purged.purgedMemoryIdHash,
+      reason: "User explicitly requested permanent deletion",
+      actor_kind: "HUMAN_CLI",
+    });
+    assert.equal((audit.prepare("SELECT count(*) AS count FROM memory_revisions").get() as { count: number }).count, 0);
+  } finally {
+    audit.close();
+  }
+});
+
 test("restores the preflight backup when a legacy migration fails", () => {
   const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-broken-migration-"));
   temporaryDirectories.push(directory);

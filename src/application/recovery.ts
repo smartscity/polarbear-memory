@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSy
 import { basename, join, relative, sep } from "node:path";
 import type { ProjectBinding } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION } from "../storage/sqlite-store.js";
+import { withExclusiveDatabaseMaintenance } from "../storage/client-lease.js";
 
 export interface BackupInspection {
   path: string;
@@ -56,6 +57,10 @@ export function listBackups(project: ProjectBinding): BackupInspection[] {
 }
 
 export function restoreBackup(project: ProjectBinding, input: string): { restored: BackupInspection; rollbackPath?: string } {
+  return withExclusiveDatabaseMaintenance(project.databasePath, () => restoreBackupExclusive(project, input));
+}
+
+function restoreBackupExclusive(project: ProjectBinding, input: string): { restored: BackupInspection; rollbackPath?: string } {
   const restored = inspectBackup(project, input);
   mkdirSync(join(project.dataDir, "backups"), { recursive: true, mode: 0o700 });
   const temporary = join(project.dataDir, `.restore-${randomUUID()}.db`);

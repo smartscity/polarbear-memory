@@ -145,7 +145,7 @@ test("validation 7.3 and type matrix: short-term state is bounded while old dura
   }
 });
 
-test("validation 7.4: maintenance is explainable and reversible without canonical purge", () => {
+test("validation 7.4: maintenance is explainable and reversible without automatic canonical purge", () => {
   const { root, projectId, store } = fixture();
   try {
     const head = git(root, ["rev-parse", "HEAD"]);
@@ -180,7 +180,7 @@ test("validation 7.4: maintenance is explainable and reversible without canonica
     assert.deepEqual(restored.relations, before.relations);
     assert.equal(restored.revisionCount, (archived?.revisionCount ?? 0) + 1);
     assert.equal(runMaintenance(store, projectId, root, { dryRun: false, head, now: new Date("2026-01-10T00:00:00Z") }).changed, 0);
-    assert.equal("purge" in store, false);
+    assert.equal(store.get(projectId, todo.id)?.content, before.content);
   } finally {
     store.close();
   }

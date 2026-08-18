@@ -4,7 +4,7 @@ import { createServer, createConnection, type Server, type Socket } from "node:n
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { compileContext } from "../application/context.js";
 import { runMaintenance } from "../application/maintenance.js";
-import { inspectBackup, listBackups } from "../application/recovery.js";
+import { inspectBackup, listBackups, restoreBackup } from "../application/recovery.js";
 import { MVP_MEMORY_TYPES, type LifecycleStatus, type MemoryType, type VerificationState } from "../domain/memory.js";
 import { discoverGitContext } from "../platform/git.js";
 import { defaultDataRoot, loadProject, readProjectPolicy, updateProjectPolicy, type CaptureMode } from "../platform/project.js";
@@ -14,13 +14,17 @@ export const ADMIN_API_VERSION = "1.1";
 export const ENGINE_VERSION = "0.1.0";
 export const ADMIN_CAPABILITIES = [
   "projects.status",
+  "system.shutdown",
   "memories.list",
   "memories.get",
   "memories.history",
+  "memories.update",
   "memories.verify",
   "memories.archive",
   "memories.restore",
   "memories.relate",
+  "memories.purge_preview",
+  "memories.purge",
   "contexts.explain",
   "projects.diagnostics",
   "projects.config",
@@ -30,6 +34,8 @@ export const ADMIN_CAPABILITIES = [
   "backups.list",
   "backups.create",
   "backups.verify",
+  "backups.restore_preview",
+  "backups.restore",
   "knowledge.promote_preview",
   "knowledge.promote",
 ] as const;
@@ -61,6 +67,7 @@ interface AdminResponse {
 
 export interface AdminServiceHandle {
   paths: AdminServicePaths;
+  closed: Promise<void>;
   close(): Promise<void>;
 }
 
@@ -271,6 +278,13 @@ async function dispatch(method: string, rawParams: unknown): Promise<unknown> {
       items: store.revisions(project.id, text(params.memoryId, "memoryId", 128)),
     }));
   }
+  if (method === "memories.update") {
+    return withProject(params.projectRoot, (store, project) => store.update(project.id, text(params.memoryId, "memoryId", 128), {
+      summary: text(params.summary, "summary", 2048),
+      content: text(params.content, "content", 16 * 1024),
+      reason: text(params.reason, "reason", 2048),
+    }));
+  }
   if (method === "memories.verify") {
     return withProject(params.projectRoot, (store, project) => {
       const state = text(params.state, "state", 32).toUpperCase() as VerificationState;
@@ -305,6 +319,21 @@ async function dispatch(method: string, rawParams: unknown): Promise<unknown> {
         text(params.reason, "reason", 2048),
       );
       return { recorded: true };
+    });
+  }
+  if (method === "memories.purge_preview" || method === "memories.purge") {
+    return withProject(params.projectRoot, (store, project) => {
+      const memoryId = text(params.memoryId, "memoryId", 128);
+      const memory = store.get(project.id, memoryId);
+      if (!memory) throw new ApiError("NOT_FOUND", "The requested Memory does not exist in this project.");
+      const confirmation = `PURGE ${memory.id}`;
+      if (method === "memories.purge_preview") return {
+        memory: { id: memory.id, summary: memory.summary, type: memory.type, revisionCount: memory.revisionCount },
+        confirmation,
+        warning: "Physical purge deletes the operational Memory, revisions, anchors and relations. Existing backups may retain copies.",
+      };
+      if (text(params.confirmation, "confirmation", 1024) !== confirmation) throw new ApiError("CONFIRMATION_REQUIRED", `Type exactly: ${confirmation}`);
+      return store.purge(project.id, memoryId, text(params.reason, "reason", 2048));
     });
   }
   if (method === "contexts.explain") {
@@ -346,6 +375,18 @@ async function dispatch(method: string, rawParams: unknown): Promise<unknown> {
       store.close();
     }
   }
+  if (method === "backups.restore_preview" || method === "backups.restore") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    const fileName = text(params.fileName, "fileName", 512);
+    const { path: _path, ...inspection } = inspectBackup(project, fileName);
+    const confirmation = `RESTORE ${inspection.fileName}`;
+    if (method === "backups.restore_preview") {
+      return { backup: inspection, confirmation, warning: "Restore replaces the operational database and preserves the current database as a rollback backup." };
+    }
+    if (text(params.confirmation, "confirmation", 1024) !== confirmation) throw new ApiError("CONFIRMATION_REQUIRED", `Type exactly: ${confirmation}`);
+    const result = restoreBackup(project, fileName);
+    return { restored: inspection, rollbackFileName: result.rollbackPath ? basename(result.rollbackPath) : null };
+  }
   if (method === "knowledge.promote_preview") {
     return promotionPlan(
       text(params.projectRoot, "projectRoot", 16 * 1024),
@@ -373,7 +414,7 @@ function writeResponse(socket: Socket, response: AdminResponse): void {
   socket.end(frame);
 }
 
-function handleSocket(socket: Socket, token: string): void {
+function handleSocket(socket: Socket, token: string, shutdown: () => void): void {
   socket.setTimeout(5_000, () => socket.destroy());
   let bytes = 0;
   let input = "";
@@ -393,6 +434,11 @@ function handleSocket(socket: Socket, token: string): void {
       const major = typeof request.apiVersion === "string" ? request.apiVersion.split(".")[0] : undefined;
       if (major !== ADMIN_API_VERSION.split(".")[0]) throw new ApiError("INCOMPATIBLE_API", `Memory Admin API ${ADMIN_API_VERSION} is required.`);
       if (typeof request.method !== "string") throw new ApiError("INVALID_REQUEST", "method is required.");
+      if (request.method === "system.shutdown") {
+        socket.once("finish", shutdown);
+        writeResponse(socket, { id, ok: true, result: { stopping: true } });
+        return;
+      }
       void dispatch(request.method, request.params)
         .then((result) => writeResponse(socket, { id, ok: true, result }))
         .catch((error: unknown) => writeResponse(socket, { id, ok: false, error: safeError(error) }));
@@ -423,7 +469,21 @@ export async function startAdminApi(dataRoot = defaultDataRoot()): Promise<Admin
     if (!stat.isSocket() || (typeof process.getuid === "function" && stat.uid !== process.getuid())) throw new Error("Refusing to replace an unsafe service socket path.");
     unlinkSync(paths.socket);
   }
-  const server: Server = createServer((socket) => handleSocket(socket, token));
+  let resolveClosed: (() => void) | undefined;
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+  let closePromise: Promise<void> | undefined;
+  const server: Server = createServer((socket) => handleSocket(socket, token, () => { void close(); }));
+  server.once("close", () => resolveClosed?.());
+  const close = (): Promise<void> => {
+    closePromise ??= new Promise<void>((resolveClose, reject) => {
+      server.close((error) => {
+        if (error) { reject(error); return; }
+        if (existsSync(paths.socket) && lstatSync(paths.socket).isSocket()) unlinkSync(paths.socket);
+        resolveClose();
+      });
+    });
+    return closePromise;
+  };
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(paths.socket, () => { server.off("error", reject); resolveListen(); });
@@ -431,10 +491,8 @@ export async function startAdminApi(dataRoot = defaultDataRoot()): Promise<Admin
   chmodSync(paths.socket, SERVICE_FILE_MODE);
   return {
     paths,
-    close: async () => {
-      await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
-      if (existsSync(paths.socket) && lstatSync(paths.socket).isSocket()) unlinkSync(paths.socket);
-    },
+    closed,
+    close,
   };
 }
 
@@ -445,5 +503,6 @@ export async function serveAdminApi(): Promise<void> {
     const stop = () => void handle.close().finally(resolveStop);
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    void handle.closed.then(resolveStop);
   });
 }

@@ -28,6 +28,7 @@ test("validates and restores a backup while preserving a rollback database", asy
   const backupPath = join(project.dataDir, "backups", "known-good.db");
   await store.backup(backupPath);
   store.record(project.id, { type: "TODO", summary: "After backup" });
+  assert.throws(() => restoreBackup(project, "known-good.db"), /active clients/u);
   store.close();
 
   assert.equal(inspectBackup(project, "known-good.db").integrity, "ok");

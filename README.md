@@ -90,9 +90,10 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 ## MVP-4 Polarbear Desktop control plane
 
 - `service run`: starts Admin API v1 on a current-user Unix-domain socket. It never listens on TCP; the service directory is `0700`, and the socket/token are `0600`.
-- The versioned API supports capability negotiation, project overview, timeline/search/detail, verify/dispute, reversible archive/restore, Context Pack explanation, and two-phase Promote to Markdown.
+- The versioned API supports capability negotiation, project overview, timeline/search/detail, auditable content edits, verify/dispute, reversible archive/restore, approved physical purge, Context Pack explanation, project policy, maintenance, backup/restore, service shutdown, and two-phase Promote to Markdown.
 - Promote first returns inert source text, target path, and SHA-256. The confirmed write must present the same SHA-256 and uses exclusive creation, so it neither silently changes after preview nor overwrites an existing file.
-- Polarbear Desktop holds no database code or token in its webview. Its Rust backend validates current-user ownership and permissions, then proxies an allowlisted, size-bounded request.
+- Polarbear Desktop holds no database code or token in its webview. Its Rust backend binds the canonical current workspace, validates current-user ownership and permissions, then proxies an allowlisted, size-bounded request.
+- Database restore uses an exclusive maintenance marker plus per-process client leases. It refuses an active writer, preserves a rollback backup, and never asks Desktop to manipulate `memory.db`.
 - The Memory panel renders content with React text nodes and `<pre>` only: no HTML execution, remote image loading, fenced-code execution, or PlantUML rendering.
 - macOS and Linux are the runnable MVP-4 transport target. Windows named-pipe support remains a post-MVP portability item.
 

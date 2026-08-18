@@ -14,7 +14,9 @@ Do not open a public issue containing credentials, private source code, Memory c
 - The Admin API uses a current-user Unix-domain socket; it does not listen on TCP.
 - Memory content is untrusted data and is never executed.
 - Canonical Memory is never physically purged by Agent or automatic-maintenance paths.
+- Human physical purge requires Admin preview, an exact Memory-ID confirmation and a reason; it removes content while retaining only a one-way ID hash and non-content audit metadata.
 - `memory.db` is owned exclusively by Memory Engine code. Polarbear Desktop uses the versioned Admin API.
+- Database restore acquires an exclusive maintenance marker and refuses active Engine client leases. Desktop Native state accepts Memory requests only for its bound canonical workspace.
 
 ## Release requirements
 

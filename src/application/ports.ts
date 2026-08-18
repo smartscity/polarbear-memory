@@ -6,6 +6,8 @@ export interface MemoryStore {
   initializeProject(project: { id: string; name: string }): void;
   record(projectId: string, input: RecordMemoryInput): Memory;
   get(projectId: string, memoryId: string): Memory | undefined;
+  update(projectId: string, memoryId: string, input: { summary: string; content: string; reason: string }): Memory;
+  purge(projectId: string, memoryId: string, reason: string): { purgedMemoryIdHash: string };
   revisions(projectId: string, memoryId: string): MemoryRevision[];
   search(projectId: string, query: string, limit: number): MemorySearchResult[];
   recent(projectId: string, limit: number): MemorySearchResult[];
