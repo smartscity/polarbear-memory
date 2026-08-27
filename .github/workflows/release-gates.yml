@@ -60,18 +60,23 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      # 使用 Git tag 作为版本号
       - name: Set version from tag
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+
           npm version "$VERSION" \
             --no-git-tag-version \
             --allow-same-version
 
           echo "package version: $(node -p "require('./package.json').version")"
 
-      - run: npm run release:macos:unsigned
+      # package version 变了以后，SBOM 必须重新生成
+      - name: Generate SBOM
+        run: npm run sbom:generate
+
+      - name: Build macOS unsigned package
+        run: npm run release:macos:unsigned
 
       - uses: actions/upload-artifact@v4
         with:
@@ -102,7 +107,6 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      # 使用 Git tag 作为 npm package version
       - name: Set version from tag
         shell: bash
         run: |
@@ -113,6 +117,10 @@ jobs:
             --allow-same-version
 
           echo "Publishing polarbear-memory@$VERSION"
+
+      # npm publish 如果内部也会 sbom:check，这里同样需要
+      - name: Generate SBOM
+        run: npm run sbom:generate
 
       - name: Publish
         run: npm publish --access public --provenance
