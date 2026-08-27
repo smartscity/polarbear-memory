@@ -119,8 +119,7 @@ polarbear-memory/
   eslint.config.js
   .node-version
   license-policy.json
-  LICENSE-APACHE
-  LICENSE-MIT
+  LICENSE
   README.md
   SECURITY.md
   docs/
@@ -189,8 +188,8 @@ adapter-claude-code ────┘          │
 - npm workspaces 统一 dependency version、build 和 lint。
 - 开启 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`useUnknownInCatchVariables`。
 - domain/application 边界禁止未说明的 `any`、未验证 type assertion 和直接信任 JSON parse 结果。
-- 使用 ESM；对外 package 的 `exports` 和 `types` 显式声明。
-- 根 package 默认 `private: true`，确认 SDK 发布策略后逐个 package 开放。
+- 当前对外产物是 CLI，不暴露 SDK import surface，因此只声明 `bin`；未来新增 SDK 时再显式声明 `exports` 和 `types`。
+- 根 package `private: false`，只发布独立 production build、Admin API contract 和安装/安全/许可证材料；设计文档、源码与测试不进入 npm tarball。
 - production dependency 使用 exact version；默认禁止 install script、Git dependency 和未审计 native addon。
 - release 平台包捆绑固定 Node runtime 与编译后 JS，用户不需要预装 Node。
 
@@ -1143,21 +1142,21 @@ PlantUML 官方安全文档明确说明不同 profile 对本地文件和 URL 的
 
 > 本节是工程风险控制，不构成法律意见。最终发布前应按实际 `package-lock.json`、Node runtime、平台发行包和分发方式复核，而不是只依据本表。
 
-### 18.1 项目许可证建议
+### 18.1 项目许可证决策
 
-与现有 Polarbear 保持一致，建议项目采用：
+项目采用：
 
 ```text
-MIT OR Apache-2.0
+Apache-2.0
 ```
 
 理由：
 
 - 与 Node、TypeScript、Rust 及 Polarbear 现有生态常见许可证兼容。
-- Apache-2.0 提供明确专利授权；MIT 提供简洁选项。
+- Apache-2.0 提供明确的版权和专利授权。
 - 便于未来开源、商业分发和 SDK 使用。
 
-要求：提交 `LICENSE-MIT`、`LICENSE-APACHE`，`package.json` 使用 SPDX 表达式 `(MIT OR Apache-2.0)`；第三方 NOTICE 不得遗漏。
+要求：根目录提交完整 `LICENSE`，`package.json` 使用 SPDX identifier `Apache-2.0`；第三方 NOTICE 不得遗漏。
 
 ### 18.2 首选依赖
 
@@ -1240,6 +1239,7 @@ npm audit --audit-level=high
 npm run licenses:check
 npm run dependencies:check
 npm sbom --sbom-format cyclonedx
+npm run package:check
 ```
 
 `dependencies:check` 至少检查：lockfile 完整性、exact direct dependencies、registry source、Git/URL dependency、install scripts、native addon、重复高风险 package 和 runtime dependency 数量预算。若某个必要 dependency 需要 install script，必须改用单独隔离 job、记录脚本内容并通过 ADR；不能悄悄去掉 `--ignore-scripts`。
@@ -1250,6 +1250,7 @@ npm sbom --sbom-format cyclonedx
 - 生成 third-party notices。
 - 对 release bundle 记录 Node、npm package 和可选 native component metadata。
 - 扫描 bundle 中意外的 network import、native addon、install script 和未声明 asset。
+- 对 npm 实际 pack manifest 执行逐路径 allowlist 审计，并从生成的 `.tgz` 在临时目录完成 CLI 安装 smoke test。
 - 保存 Node version、target、lockfile digest、Node binary digest 和 source revision。
 - 签名产物并发布 checksum/provenance。
 
@@ -1266,7 +1267,7 @@ npm sbom --sbom-format cyclonedx
 - 每次升级审查 changelog、export/API diff、Node compatibility、install scripts、license 和 advisories。
 - direct dependency 使用 exact version；transitive resolution 由 lockfile 固定。
 - 默认拒绝有 `preinstall/install/postinstall` 的 runtime dependency。
-- end-user release 不执行 `npm install`；平台包已包含经过审计的 `dist`、Node runtime 和 notices。
+- npm CLI 渠道由 npm 安装经过 lockfile/许可证门禁的运行时依赖；平台安装包渠道则捆绑经过审计的 `dist`、Node runtime 和 notices，不在终端用户机器执行 `npm install`。
 
 ### 19.2 Build
 
@@ -1275,7 +1276,7 @@ npm sbom --sbom-format cyclonedx
 - macOS 平台包、launcher 和捆绑 Node binary 完成 code signing/notarization；其他平台按目标签名。
 - release 构建不从网络下载运行期 asset、模型或 JAR。
 - Node runtime 只从官方固定 URL/digest 或受控 artifact mirror 获取，并校验 checksum；不得由任意 npm package 下载。
-- 编译输出、运行时文件和第三方 notices 使用 allowlist manifest 打包，不能直接复制整个开发 `node_modules`。
+- npm 包以 `package.json#files`、`tsconfig.npm.json` production build 和 pack-manifest 审计形成三层白名单；不能发布整个开发 `dist` 或复制整个开发 `node_modules`。
 - 尽可能复现构建；不满足时至少保存 provenance 和完整材料清单。
 
 ### 19.3 Update
@@ -1764,7 +1765,7 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 - [ ] 接受 v0.1 runtime 零主动外联，所有网络 provider 后置且隔离。
 - [ ] 接受不引入 libgit2、Vector DB、tree-sitter、PlantUML renderer。
 - [ ] 接受 SQLite 位于用户数据目录，repo 只存 config/knowledge。
-- [ ] 接受 `MIT OR Apache-2.0` 项目许可证建议。
+- [x] 接受 `Apache-2.0` 项目许可证决策。
 - [ ] 接受默认拒绝 copyleft/source-available/unknown dependency 的 license policy。
 - [ ] 接受 Polarbear Desktop 在 MVP-4 才接入，且不直接访问 SQLite。
 - [ ] 接受每个 MVP 未达到退出门槛时暂停扩范围。

@@ -36,6 +36,7 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 - `uninstall --keep-data`: remove managed integration while retaining all Memory data.
 - `uninstall --delete-data --confirm PROJECT_ID`: move project data into recoverable user-data trash; repository config and promoted Markdown remain untouched.
 - `npm run benchmark:ga`: execute deterministic resume, retention, and hostile-content release fixtures.
+- `npm run package:check`: build the npm-only runtime, audit the exact tarball allowlist, install the `.tgz` in a temporary directory and smoke-test the CLI.
 - `npm run release:macos`: build, sign, notarize, staple and verify the macOS `.pkg`; protected Apple credentials are mandatory.
 - `npm run release:macos:unsigned`: local packaging validation only and never a publishable artifact.
 
@@ -101,4 +102,8 @@ Claude Code project MCP servers require a one-time user approval. The generated 
 
 Runtime code uses only the official MCP stdio server SDK and Zod in addition to Node built-ins. `node:net` is isolated to the audited Unix-domain-socket module; HTTP, HTTPS, TLS, DNS and `fetch` remain forbidden in the Engine release. Project repositories contain configuration, integration files, and explicitly promoted Markdown only; `memory.db` is owned by the Memory Engine and stored in the operating system's user-data directory.
 
-See [PRD](docs/PRD.md), [TRD](docs/TRD.md), [User Manual](docs/USER_MANUAL.md), and [Memory Retention Validation](docs/MEMORY_RETENTION_VALIDATION.md).
+See [PRD](docs/PRD.md), [TRD](docs/TRD.md), [User Manual](docs/USER_MANUAL.md), [npm Release Guide](docs/NPM_RELEASE.md), and [Memory Retention Validation](docs/MEMORY_RETENTION_VALIDATION.md).
+
+## License
+
+Polarbear Memory is licensed under the [Apache License 2.0](LICENSE).

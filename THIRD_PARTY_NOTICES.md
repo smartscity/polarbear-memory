@@ -22,4 +22,4 @@ The macOS package includes the pinned Node.js runtime. Node.js is distributed un
 
 This list was derived from the installed package metadata and must be regenerated and reviewed whenever the lockfile changes. Release packaging must preserve the license notices for runtime dependencies and exclude test-only client dependencies.
 
-The Polarbear Memory project itself is currently marked `UNLICENSED` while the proposed `MIT OR Apache-2.0` licensing decision remains under review. Do not publish or redistribute it as an open-source package until that decision is explicitly accepted and the corresponding license texts are added.
+Polarbear Memory itself is licensed under Apache License 2.0. The project license is stored in the repository root `LICENSE` file and is separate from the third-party licenses listed above.

@@ -1,17 +1,38 @@
 {
   "name": "polarbear-memory",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Local-first persistent memory for coding agents",
   "type": "module",
   "bin": {
     "polarbear-memory": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "api/admin-v1.json",
+    "README.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smartscity/polarbear-memory.git"
+  },
+  "homepage": "https://github.com/smartscity/polarbear-memory#readme",
+  "bugs": {
+    "url": "https://github.com/smartscity/polarbear-memory/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "engines": {
     "node": ">=24.10.0 <27"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:npm": "tsc -p tsconfig.npm.json",
     "clean": "node --run clean:dist",
     "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "start": "node dist/cli.js",
@@ -29,15 +50,21 @@
     "benchmark:ga": "npm run build && node scripts/ga-readiness.mjs",
     "release:macos": "node scripts/build-macos-release.mjs",
     "release:macos:unsigned": "node scripts/build-macos-release.mjs --unsigned",
+    "package:audit": "node scripts/npm-package-audit.mjs",
+    "package:smoke": "node scripts/npm-package-smoke.mjs",
+    "package:check": "npm run clean && npm run build:npm && npm run package:audit && npm run package:smoke",
     "check": "npm run format:check && npm run lint && npm run admin-contract:check && npm test && npm run licenses:check && npm run dependencies:check && npm run bundle:audit && npm run sbom:check && npm run benchmark:ga",
-    "release:check": "npm ci --ignore-scripts && npm run check && npm run advisories:check"
+    "release:gates": "npm run check && npm run advisories:check && npm run package:check",
+    "release:check": "npm ci --ignore-scripts && npm run release:gates",
+    "prepack": "npm run clean && npm run build:npm",
+    "prepublishOnly": "npm run release:gates"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "24.10.1",
     "typescript": "5.9.3"
   },
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
     "zod": "4.2.0"

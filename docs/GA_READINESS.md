@@ -15,6 +15,7 @@ The engineering implementation is versioned `0.1.0`, but public GA requires both
 | SBOM drift | `npm run sbom:check` | pass |
 | Deterministic GA fixtures | `npm run benchmark:ga` | pass |
 | High/critical advisories | `npm run advisories:check` | zero high/critical |
+| npm tarball allowlist and install smoke | `npm run package:check` | production-only files; installed CLI runs |
 | Clean installation | `npm run release:check` | pass from `npm ci --ignore-scripts` |
 | macOS artifact | `npm run release:macos` | signed, notarized, stapled and signature-verified |
 
@@ -26,7 +27,7 @@ The deterministic resume fixture requires â‰¥30% fewer pre-edit file reads and â
 - Complete two consecutive weeks of dogfood with no unresolved P0/P1 data-loss or security defect.
 - Configure a private security contact and incident-response owner.
 - Produce the macOS package using the protected Apple Developer Installer identity and notary profile; retain notarization and checksum evidence.
-- Review the project licensing decision. The repository remains `UNLICENSED`; publishing or redistribution is blocked until the chosen license texts and package metadata are approved.
+- Apache-2.0 has been selected and recorded in the root `LICENSE`, `package.json`, lockfile and third-party notices. Release review must continue to preserve the license and notices in every distributed artifact.
 
 ## Honest release decision
 
