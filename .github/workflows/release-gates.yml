@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,37 @@ jobs:
       - run: npm run check
       - run: npm run advisories:check
 
+  release-metadata:
+    name: Verify release tag and package version
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release tag must have the exact form vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          TAG_VERSION="${BASH_REMATCH[1]}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          LOCK_VERSION="$(node -p "require('./package-lock.json').version")"
+
+          echo "tag version:          $TAG_VERSION"
+          echo "package.json version: $PACKAGE_VERSION"
+          echo "package-lock version: $LOCK_VERSION"
+
+          if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" || "$TAG_VERSION" != "$LOCK_VERSION" ]]; then
+            echo "Tag version must match package.json and package-lock.json"
+            exit 1
+          fi
+
   macos-release-candidate:
-    needs: checks
+    needs: [checks, release-metadata]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     timeout-minutes: 30
@@ -44,7 +73,32 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: unsigned-macos-package-structure-test
+          name: unsigned-macos-package-${{ github.ref_name }}
           path: artifacts/*-unsigned.pkg*
           if-no-files-found: error
           retention-days: 7
+
+  publish-npm:
+    name: Publish npm
+    needs: [checks, release-metadata, macos-release-candidate]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+
+      - run: npm ci --ignore-scripts
+
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

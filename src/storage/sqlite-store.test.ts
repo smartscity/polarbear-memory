@@ -73,6 +73,36 @@ test("compiles relevant memory without exceeding the token budget", () => {
   }
 });
 
+test("records and resets estimated Context compiler token savings", () => {
+  const { store, projectId } = createStore();
+  try {
+    for (let index = 0; index < 8; index += 1) {
+      store.record(projectId, {
+        type: "PITFALL",
+        summary: `Settlement retry rule ${index}`,
+        content: `Settlement retry evidence ${index}: ${"avoid duplicate transaction work ".repeat(8)}`,
+      });
+    }
+    const context = compileContext(store, projectId, "settlement retry", 200);
+    const savings = store.tokenSavings(projectId);
+    assert.equal(savings.contextPackCount, 1);
+    assert.equal(savings.candidateCount, 8);
+    assert.equal(savings.selectedCount, context.selected);
+    assert.equal(savings.contextTokens, context.estimatedTokens);
+    assert.ok(savings.baselineTokens > savings.contextTokens);
+    assert.equal(savings.estimatedSavedTokens, savings.baselineTokens - savings.contextTokens);
+
+    const reset = store.resetTokenSavings(projectId, "2026-08-27T00:00:00.000Z");
+    assert.equal(reset.contextPackCount, 0);
+    assert.equal(reset.estimatedSavedTokens, 0);
+    assert.equal(reset.measurementStartedAt, "2026-08-27T00:00:00.000Z");
+    assert.equal(reset.resetCount, 1);
+    assert.equal(store.status(projectId).total, 8);
+  } finally {
+    store.close();
+  }
+});
+
 test("schema initialization, backup and FTS rebuild are reliable", async () => {
   const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-test-"));
   temporaryDirectories.push(directory);

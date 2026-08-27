@@ -30,7 +30,7 @@ npx polarbear-memory --version
 - `npm run package:audit` 审计 npm 实际计算出的 tarball 文件清单，而不是只检查源码目录。
 - `npm run package:smoke` 从真实 `.tgz` 安装到临时目录，并执行版本检查和 `init --dry-run`。
 
-当前 dry-run tarball 为 26 个文件、约 200 KB。PRD、TRD、用户手册、验证方案、`.business/`、`src/`、测试、fixture、脚本和 source map 均不发布。首次正式发布仍需完成 npm 账号、2FA、包名复查和 release commit 审核。
+当前 dry-run tarball 为 27 个文件、约 212 KB。PRD、TRD、用户手册、验证方案、`.business/`、`src/`、测试、fixture、脚本和 source map 均不发布。首次正式发布仍需完成 npm 账号、2FA、包名复查和 release commit 审核。
 
 Registry 对 `polarbear-memory` 当前返回 HTTP 404，包名看起来尚未占用，但这不构成预留。正式发布前必须再次检查：
 
@@ -240,10 +240,11 @@ https://www.npmjs.com/package/polarbear-memory
 
 ```text
 维护者合并 release commit
-  → 创建并发布 GitHub Release
+  → push 与 package version 一致的 vMAJOR.MINOR.PATCH tag
   → GitHub Actions 在 GitHub-hosted runner 执行全部 release gates
+  → 生成并保存 unsigned macOS release candidate
   → npm 通过 OIDC 验证指定 repository/workflow
-  → 直接发布，或先进入 npm Staged Packages 等待人工 2FA 批准
+  → npm publish --provenance
 ```
 
 这不是“GitHub 自己拥有 npm 密码”，而是 npm Trusted Publishing 在每次 workflow 运行时验证 GitHub OIDC 短期身份。因此不需要把长期 `NPM_TOKEN` 存进 GitHub Secrets。只有指定仓库、指定 workflow 和可选 GitHub Environment 能取得发布权限。
@@ -258,41 +259,17 @@ Packages → polarbear-memory → Settings → Trusted publishing
 
 - Organization/User：`smartscity`
 - Repository：`polarbear-memory`
-- Workflow filename：例如 `publish-npm.yml`
+- Workflow filename：`release-gates.yml`
 - Environment：若使用 GitHub protected environment，填写对应名称
 - Allowed actions：优先只允许 `npm stage publish`；若团队接受自动直发，再允许 `npm publish`
 
 Trusted Publishing 使用 OIDC 短期凭证，不需要在 GitHub Secrets 保存 `NPM_TOKEN`。npm 官方当前要求 npm CLI `11.5.1+`、Node.js `22.14.0+`，并且必须使用 GitHub-hosted runner。GitHub Actions/GitLab Trusted Publishing 会自动生成 provenance；公开包要获得 provenance，源码仓库也必须公开。
 
-下面是可用于自动直发的完整 workflow 示例。production package build 和文件白名单现已具备，但必须在第一次手工发布取得包所有权，并在 npm 配置 Trusted Publisher 后，才能把 workflow 保存为 `.github/workflows/publish-npm.yml` 并启用；过早启用只会产生失败的 release job。
+仓库当前的 [release-gates.yml](../.github/workflows/release-gates.yml) 已实现完整链路：PR 和手工触发只运行 checks；普通 main push 不触发该 workflow；只有 push `v*.*.*` tag 才继续执行精确 SemVer 校验、macOS artifact 和 npm publish。校验要求 tag、`package.json` 与 `package-lock.json` 三者版本完全相同，并拒绝 `v1.2`、`release-1.2.3` 或带额外后缀的 tag。
 
-```yaml
-name: Publish npm package
+当前 workflow 使用 GitHub Secret `NPM_TOKEN`，同时申请 `id-token: write` 生成 provenance。完成 npm Trusted Publisher 配置后，应删除 `NODE_AUTH_TOKEN` 环境变量和长期 write token，由 OIDC 直接授权；其余 job 不需要改变。
 
-on:
-  release:
-    types: [published]
-
-permissions:
-  contents: read
-  id-token: write
-
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.10.0
-          registry-url: https://registry.npmjs.org
-          cache: npm
-      - run: npm install --global npm@latest
-      - run: npm ci --ignore-scripts
-      - run: npm publish --access public
-```
-
-`npm publish` 会自动触发 `prepublishOnly`，从而执行 `release:gates`；workflow 已先执行干净的 `npm ci --ignore-scripts`，无需再运行一次包含 `npm ci` 的 `release:check`。
+`npm publish` 会自动触发 `prepublishOnly`，从而再次执行 `release:gates`；这是 Registry 写入前的最后一道本地包门禁。
 
 工作流文件名、repository owner/name 与 npm Trusted Publisher 设置必须完全一致，大小写也要一致。Trusted Publishing 配置成功后，建议在 npm package settings 中选择“Require two-factor authentication and disallow tokens”，并撤销不再使用的 automation write tokens。
 
@@ -318,12 +295,17 @@ Staged Publishing 要求 npm CLI `11.15.0+`，并且只适用于 Registry 中已
 git switch main
 git pull --ff-only
 npm ci --ignore-scripts
+npm version 0.1.2 --no-git-tag-version
+npm run sbom:generate
 npm run release:check
-npm version patch
-git push origin main --follow-tags
+git add package.json package-lock.json docs/SBOM.cdx.json
+git commit -m "release: v0.1.2"
+git tag v0.1.2
+git push origin main
+git push origin v0.1.2
 ```
 
-确认 tag 对应的版本和 release notes 后创建 GitHub Release，让 Trusted Publishing workflow 发布。不要手工修改一个已经发布的 tarball；同一个 `name@version` 永远不能再次使用，即使该版本后来被 unpublish。
+上面的 `0.1.2` 只是示例，必须换成实际新版本。先提交版本文件和生成的 SBOM，再对该提交打 tag；不能先打 tag 再修改版本。tag push 会触发自动发布，GitHub Release 可在成功后补充 release notes。不要手工修改一个已经发布的 tarball；同一个 `name@version` 永远不能再次使用，即使该版本后来被 unpublish。
 
 若要先发候选版本：
 

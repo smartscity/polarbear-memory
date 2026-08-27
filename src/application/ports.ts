@@ -2,6 +2,18 @@ import type { LifecycleStatus, Memory, MemorySearchResult, MemoryType, RecordMem
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 import type { CompletionState, FileAnchor, MaintenanceAction, MemoryRelationType, MemoryRevision } from "../domain/lifecycle.js";
 
+export interface TokenSavingsStats {
+  contextPackCount: number;
+  candidateCount: number;
+  selectedCount: number;
+  baselineTokens: number;
+  contextTokens: number;
+  estimatedSavedTokens: number;
+  measurementStartedAt: string;
+  lastContextAt?: string;
+  resetCount: number;
+}
+
 export interface MemoryStore {
   initializeProject(project: { id: string; name: string }): void;
   record(projectId: string, input: RecordMemoryInput): Memory;
@@ -17,7 +29,15 @@ export interface MemoryStore {
   restore(projectId: string, memoryId: string, reason: string): Memory;
   complete(projectId: string, memoryId: string, state: Exclude<CompletionState, "OPEN">, reason: string, now?: Date): Memory;
   addRelation(projectId: string, sourceMemoryId: string, targetMemoryId: string, type: MemoryRelationType, reason: string): void;
-  noteContextUsage(projectId: string, candidateIds: string[], selectedIds: string[], now: string): void;
+  noteContextUsage(
+    projectId: string,
+    candidateIds: string[],
+    selectedIds: string[],
+    tokens: { baseline: number; context: number },
+    now: string,
+  ): void;
+  tokenSavings(projectId: string): TokenSavingsStats;
+  resetTokenSavings(projectId: string, now: string): TokenSavingsStats;
   noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory;
   maintenanceCursor(projectId: string): string | undefined;
   maintenanceCandidates(projectId: string, limit: number, targetCommit?: string, archiveBefore?: string, now?: string, changedPaths?: string[]): Memory[];

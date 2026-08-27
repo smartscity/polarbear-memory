@@ -475,6 +475,12 @@ memory_usage_stats(memory_id, candidate_count, selected_count,
                    last_candidate_at?, last_selected_at?, last_positive_at?,
                    updated_at)
 
+context_token_savings(project_id, context_pack_count,
+                      candidate_count, selected_count,
+                      baseline_tokens, context_tokens,
+                      estimated_saved_tokens, measurement_started_at,
+                      last_context_at?, reset_count)
+
 lifecycle_assessments(id, memory_id, policy_version,
                       correctness_risk_milli, relevance_score_milli,
                       proposed_action, reason_codes_json,
@@ -1360,6 +1366,7 @@ Parser 使用 `deny_unknown_fields` 还是兼容保留未知字段，需在 MVP-
 - context compile latency。
 - recall candidate count / selected count。
 - estimated tokens。
+- candidate-baseline-v1 估算节省 token：全部检索候选的估算 tokens 减去实际 Context Pack tokens；累计值可由 Human CLI 重置，但不得表述为模型供应商账单或不可观测的推理 token。
 - stale warnings。
 - hook ingestion duration/failure。
 - DB busy/retry。

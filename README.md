@@ -35,6 +35,7 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 - `uninstall --dry-run`: preview removal of managed Claude integration entries.
 - `uninstall --keep-data`: remove managed integration while retaining all Memory data.
 - `uninstall --delete-data --confirm PROJECT_ID`: move project data into recoverable user-data trash; repository config and promoted Markdown remain untouched.
+- `savings`: show locally accumulated estimated token savings from bounded Context compilation; `savings reset --confirm RESET` starts a new measurement window without changing Memory.
 - `npm run benchmark:ga`: execute deterministic resume, retention, and hostile-content release fixtures.
 - `npm run package:check`: build the npm-only runtime, audit the exact tarball allowlist, install the `.tgz` in a temporary directory and smoke-test the CLI.
 - `npm run release:macos`: build, sign, notarize, staple and verify the macOS `.pkg`; protected Apple credentials are mandatory.
@@ -48,6 +49,7 @@ For development without `npm link`, use `node /path/to/polarbear-memory/dist/cli
 - `get MEMORY_ID`
 - `context --task TEXT [--budget N]`
 - `status`
+- `savings [show|reset --confirm RESET]`
 - `doctor`
 - `rebuild-index`
 - `backup`

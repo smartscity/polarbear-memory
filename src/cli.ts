@@ -14,8 +14,7 @@ import { captureFileAnchors } from "./platform/anchors.js";
 import { defaultDataRoot, loadProject, planProject, writeProjectConfig } from "./platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "./storage/sqlite-store.js";
 import { inspectBackup, listBackups, restoreBackup } from "./application/recovery.js";
-
-const VERSION = "0.1.0";
+import { VERSION } from "./version.js";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -34,6 +33,7 @@ Usage:
   polarbear-memory relate SOURCE_ID --type supersedes|contradicts --target TARGET_ID --reason TEXT
   polarbear-memory maintain [--dry-run] [--limit N]
   polarbear-memory status
+  polarbear-memory savings [show|reset --confirm RESET]
   polarbear-memory doctor [--export]
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
   polarbear-memory service run
@@ -186,6 +186,38 @@ function status(cwd: string): void {
     console.log(`Archived  ${counts.archived ?? 0}`);
     console.log(`Stale     ${counts.high_risk ?? 0}`);
     console.log(`Completed ${counts.completed ?? 0}`);
+  });
+}
+
+function printTokenSavings(stats: ReturnType<SqliteMemoryStore["tokenSavings"]>): void {
+  const number = new Intl.NumberFormat("en-US");
+  const rate = stats.baselineTokens > 0
+    ? ((stats.estimatedSavedTokens / stats.baselineTokens) * 100).toFixed(1)
+    : "0.0";
+  console.log(`Estimated tokens saved  ${number.format(stats.estimatedSavedTokens)}`);
+  console.log(`Candidate baseline      ${number.format(stats.baselineTokens)}`);
+  console.log(`Context tokens delivered ${number.format(stats.contextTokens)}`);
+  console.log(`Estimated saving rate   ${rate}%`);
+  console.log(`Context packs           ${number.format(stats.contextPackCount)}`);
+  console.log(`Candidates / selected   ${number.format(stats.candidateCount)} / ${number.format(stats.selectedCount)}`);
+  console.log(`Measurement started     ${stats.measurementStartedAt}`);
+  console.log(`Last context            ${stats.lastContextAt ?? "never"}`);
+  console.log(`Reset count             ${number.format(stats.resetCount)}`);
+  console.log("Method                  candidate-baseline-v1 (estimated, local only)");
+}
+
+function savings(cwd: string, args: string[]): void {
+  const action = args[0] ?? "show";
+  if (action === "show" && args.length <= 1) {
+    return withStore(cwd, (store, project) => printTokenSavings(store.tokenSavings(project.id)));
+  }
+  if (action !== "reset") throw new Error("savings accepts `show` or `reset --confirm RESET`.");
+  const parsed = parseArgs({ args: args.slice(1), options: { confirm: { type: "string" } }, strict: true });
+  if (parsed.values.confirm !== "RESET") throw new Error("savings reset requires --confirm RESET.");
+  withStore(cwd, (store, project) => {
+    const result = store.resetTokenSavings(project.id, new Date().toISOString());
+    console.log("Token savings counters reset. Historical Memory was not changed.\n");
+    printTokenSavings(result);
   });
 }
 
@@ -564,6 +596,7 @@ async function main(): Promise<void> {
     case "relate": return relate(cwd, args);
     case "maintain": return maintain(cwd, args);
     case "status": return status(cwd);
+    case "savings": return savings(cwd, args);
     case "doctor": return doctor(cwd, args);
     case "rebuild-index": return withStore(cwd, (store) => { store.rebuildSearchIndex(); console.log("Search index rebuilt."); });
     case "backup": return backupCommand(cwd, args);

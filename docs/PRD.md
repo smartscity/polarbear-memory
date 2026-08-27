@@ -705,6 +705,8 @@ v0.1 至少支持：
 polarbear-memory init
 polarbear-memory doctor
 polarbear-memory status
+polarbear-memory savings
+polarbear-memory savings reset --confirm RESET
 polarbear-memory context --task "..." --budget 1000
 polarbear-memory search "..."
 polarbear-memory get <id>
@@ -722,6 +724,7 @@ polarbear-memory benchmark
 - 破坏性操作二次确认；自动化模式要求显式 flag。
 - `doctor` 不修改状态，除非用户明确使用 `--fix`。
 - 所有命令支持从子目录发现 repo root。
+- `savings` 明确标记为估算值，采用“全部检索候选 baseline tokens - 实际 Context Pack tokens”的可复现口径；重置只开始新的本地测量窗口，不影响 Memory 数据。
 
 ## 18. 配置需求
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,6 +9,7 @@ const repository = join(temporary, "repo");
 const data = join(temporary, "data");
 const cli = join(root, "dist", "cli.js");
 const env = { ...process.env, POLARBEAR_MEMORY_DATA_DIR: data };
+const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 
 function run(command, args, cwd = repository) {
   const result = spawnSync(command, args, { cwd, env, encoding: "utf8", shell: false, timeout: 120_000 });
@@ -30,7 +31,7 @@ try {
     maliciousMemoryInert: security.passed === true,
   };
   const report = {
-    version: "0.1.0",
+    version: packageVersion,
     automated,
     passed: Object.values(automated).every(Boolean),
     measurements: {

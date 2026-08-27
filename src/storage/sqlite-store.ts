@@ -14,7 +14,7 @@ import type {
 import { ASSESSOR_VERSION, POLICY_VERSION } from "../domain/lifecycle.js";
 import type { EventEnvelope, StoredRawEvent } from "../domain/event.js";
 import { validateRecordInput } from "../domain/memory.js";
-import type { MemoryStore } from "../application/ports.js";
+import type { MemoryStore, TokenSavingsStats } from "../application/ports.js";
 import { acquireClientLease, type ClientLease } from "./client-lease.js";
 
 interface MemoryRow {
@@ -138,6 +138,19 @@ CREATE TABLE IF NOT EXISTS memory_usage_stats (
   last_feedback_at TEXT
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS context_token_savings (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  context_pack_count INTEGER NOT NULL DEFAULT 0 CHECK (context_pack_count >= 0),
+  candidate_count INTEGER NOT NULL DEFAULT 0 CHECK (candidate_count >= 0),
+  selected_count INTEGER NOT NULL DEFAULT 0 CHECK (selected_count >= 0),
+  baseline_tokens INTEGER NOT NULL DEFAULT 0 CHECK (baseline_tokens >= 0),
+  context_tokens INTEGER NOT NULL DEFAULT 0 CHECK (context_tokens >= 0),
+  estimated_saved_tokens INTEGER NOT NULL DEFAULT 0 CHECK (estimated_saved_tokens >= 0),
+  measurement_started_at TEXT NOT NULL,
+  last_context_at TEXT,
+  reset_count INTEGER NOT NULL DEFAULT 0 CHECK (reset_count >= 0)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS lifecycle_assessments (
   id TEXT PRIMARY KEY,
   memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
@@ -216,7 +229,7 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
 END;
 `;
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 function quoteSqliteLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -290,6 +303,7 @@ export class SqliteMemoryStore implements MemoryStore {
         this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(migrationTime);
         this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(migrationTime);
         this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?)").run(migrationTime);
+        this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, ?)").run(migrationTime);
         this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(CURRENT_SCHEMA_VERSION, migrationTime);
       } catch (error) {
         this.#db.close();
@@ -320,6 +334,10 @@ export class SqliteMemoryStore implements MemoryStore {
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at, schema_version = excluded.schema_version
     `).run(project.id, project.name, now, now, CURRENT_SCHEMA_VERSION);
+    this.#db.prepare(`
+      INSERT OR IGNORE INTO context_token_savings(project_id, measurement_started_at)
+      VALUES (?, ?)
+    `).run(project.id, now);
   }
 
   record(projectId: string, input: RecordMemoryInput): Memory {
@@ -849,9 +867,20 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  noteContextUsage(projectId: string, candidateIds: string[], selectedIds: string[], now: string): void {
+  noteContextUsage(
+    projectId: string,
+    candidateIds: string[],
+    selectedIds: string[],
+    tokens: { baseline: number; context: number },
+    now: string,
+  ): void {
     const candidates = [...new Set(candidateIds)].slice(0, 50);
     const selected = [...new Set(selectedIds)].filter((id) => candidates.includes(id)).slice(0, 50);
+    if (!Number.isInteger(tokens.baseline) || !Number.isInteger(tokens.context)
+      || tokens.context < 0 || tokens.baseline < tokens.context || tokens.baseline > 10_000_000) {
+      throw new Error("Context token metrics are invalid.");
+    }
+    const saved = tokens.baseline - tokens.context;
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       const candidateStatement = this.#db.prepare(`
@@ -864,11 +893,69 @@ export class SqliteMemoryStore implements MemoryStore {
         WHERE memory_id = ? AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND project_id = ?)
       `);
       for (const id of selected) selectedStatement.run(now, id, id, projectId);
+      this.#db.prepare(`
+        INSERT INTO context_token_savings(
+          project_id, context_pack_count, candidate_count, selected_count,
+          baseline_tokens, context_tokens, estimated_saved_tokens, measurement_started_at, last_context_at
+        ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+          context_pack_count = context_pack_count + 1,
+          candidate_count = candidate_count + excluded.candidate_count,
+          selected_count = selected_count + excluded.selected_count,
+          baseline_tokens = baseline_tokens + excluded.baseline_tokens,
+          context_tokens = context_tokens + excluded.context_tokens,
+          estimated_saved_tokens = estimated_saved_tokens + excluded.estimated_saved_tokens,
+          last_context_at = excluded.last_context_at
+      `).run(projectId, candidates.length, selected.length, tokens.baseline, tokens.context, saved, now, now);
       this.#db.exec("COMMIT");
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  tokenSavings(projectId: string): TokenSavingsStats {
+    const row = this.#db.prepare("SELECT * FROM context_token_savings WHERE project_id = ?").get(projectId) as {
+      context_pack_count: number;
+      candidate_count: number;
+      selected_count: number;
+      baseline_tokens: number;
+      context_tokens: number;
+      estimated_saved_tokens: number;
+      measurement_started_at: string;
+      last_context_at: string | null;
+      reset_count: number;
+    } | undefined;
+    if (!row) throw new Error(`Token savings are unavailable for project: ${projectId}`);
+    return {
+      contextPackCount: row.context_pack_count,
+      candidateCount: row.candidate_count,
+      selectedCount: row.selected_count,
+      baselineTokens: row.baseline_tokens,
+      contextTokens: row.context_tokens,
+      estimatedSavedTokens: row.estimated_saved_tokens,
+      measurementStartedAt: row.measurement_started_at,
+      ...(row.last_context_at ? { lastContextAt: row.last_context_at } : {}),
+      resetCount: row.reset_count,
+    };
+  }
+
+  resetTokenSavings(projectId: string, now: string): TokenSavingsStats {
+    const result = this.#db.prepare(`
+      UPDATE context_token_savings SET
+        context_pack_count = 0,
+        candidate_count = 0,
+        selected_count = 0,
+        baseline_tokens = 0,
+        context_tokens = 0,
+        estimated_saved_tokens = 0,
+        measurement_started_at = ?,
+        last_context_at = NULL,
+        reset_count = reset_count + 1
+      WHERE project_id = ?
+    `).run(now, projectId);
+    if (Number(result.changes) !== 1) throw new Error(`Token savings are unavailable for project: ${projectId}`);
+    return this.tokenSavings(projectId);
   }
 
   noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory {

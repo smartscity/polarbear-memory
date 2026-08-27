@@ -70,6 +70,9 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const context = run(process.execPath, offline(["context", "--task", "settlement retry", "--budget", "400"]), repository, dataDir);
     assert.match(context.stdout, /Polarbear Memory Context/);
     assert.match(context.stdout, /Do not retry settlement/);
+    assert.match(run(process.execPath, offline(["savings"]), repository, dataDir).stdout, /Estimated tokens saved/);
+    assert.match(run(process.execPath, offline(["savings", "reset", "--confirm", "RESET"]), repository, dataDir).stdout, /counters reset/);
+    assert.match(run(process.execPath, offline(["savings"]), repository, dataDir).stdout, /Estimated tokens saved\s+0/);
 
     const backup = run(process.execPath, offline(["backup"]), repository, dataDir);
     assert.match(backup.stdout, /Backup created/);

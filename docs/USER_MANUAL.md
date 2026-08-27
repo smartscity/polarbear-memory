@@ -492,6 +492,37 @@ Database: healthy
 
 状态命令用于观察系统，不会触发采集、迁移或修复。
 
+### 12.1 查看 Memory 估算节省的 token
+
+```bash
+polarbear-memory savings
+```
+
+示例输出：
+
+```text
+Estimated tokens saved  12,480
+Candidate baseline      20,300
+Context tokens delivered 7,820
+Estimated saving rate   61.5%
+Context packs           18
+Candidates / selected   96 / 31
+Measurement started     2026-08-27T10:00:00.000Z
+Last context            2026-08-27T12:30:00.000Z
+Reset count             0
+Method                  candidate-baseline-v1 (estimated, local only)
+```
+
+这里的 saved tokens 是可复现的本地估算：每次 `context` 或 `memory_context` 先估算“把检索候选全部放入上下文”的 baseline，再减去经过相关性、风险和 token budget 编译后的实际 Context Pack tokens。它衡量 Memory Context Compiler 避免的上下文膨胀，不代表模型供应商账单，也不声称知道无法观测的推理 token。
+
+开始新的统计周期：
+
+```bash
+polarbear-memory savings reset --confirm RESET
+```
+
+重置只清零当前项目的累计计数，并保留 reset count 和新统计起点；不会删除、归档或修改任何 Memory。统计只保存在本地 `memory.db`，默认不上传。
+
 ## 13. 搜索和查看 Memory
 
 搜索：

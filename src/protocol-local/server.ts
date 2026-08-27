@@ -9,9 +9,10 @@ import { MVP_MEMORY_TYPES, type LifecycleStatus, type MemoryType, type Verificat
 import { discoverGitContext } from "../platform/git.js";
 import { defaultDataRoot, loadProject, readProjectPolicy, updateProjectPolicy, type CaptureMode } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { VERSION } from "../version.js";
 
 export const ADMIN_API_VERSION = "1.1";
-export const ENGINE_VERSION = "0.1.0";
+export const ENGINE_VERSION = VERSION;
 export const ADMIN_CAPABILITIES = [
   "projects.status",
   "system.shutdown",
