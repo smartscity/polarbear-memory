@@ -12,19 +12,70 @@ jobs:
   macos-release-candidate:
     runs-on: macos-15
     timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: npm
+
       - run: npm ci --ignore-scripts
+
       - run: npm run check
+
       - run: npm run advisories:check
+
       - run: npm run release:macos:unsigned
+
       - uses: actions/upload-artifact@v4
         with:
           name: unsigned-macos-package-structure-test
           path: artifacts/*-unsigned.pkg*
           if-no-files-found: error
           retention-days: 7
+
+  publish-npm:
+    name: Publish npm
+    needs: macos-release-candidate
+
+    # 只有 push v* tag 才真正发布
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+
+      - run: npm ci --ignore-scripts
+
+      # 保证 tag 和 package.json version 一致
+      - name: Verify version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+
+          echo "tag version:     $TAG_VERSION"
+          echo "package version: $PACKAGE_VERSION"
+
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version does not match package.json version"
+            exit 1
+          fi
+
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

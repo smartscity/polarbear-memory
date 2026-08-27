@@ -5,7 +5,7 @@
   "description": "Local-first persistent memory for coding agents",
   "type": "module",
   "bin": {
-    "polarbear-memory": "./dist/cli.js"
+    "polarbear-memory": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -33,10 +33,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:npm": "tsc -p tsconfig.npm.json",
+    "build:test": "tsc -p tsconfig.test.json",
     "clean": "node --run clean:dist",
     "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "clean:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\"",
     "start": "node dist/cli.js",
-    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js dist/**/*.test.js",
+    "test": "npm run clean:test && npm run build:test && node --test --test-concurrency=1 dist-test/*.test.js dist-test/**/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "licenses:check": "node scripts/licenses-check.mjs",
     "dependencies:check": "node scripts/runtime-audit.mjs",

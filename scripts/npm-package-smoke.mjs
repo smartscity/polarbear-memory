@@ -25,11 +25,12 @@ try {
   const installDirectory = join(temporaryRoot, "install");
   const demoDirectory = join(temporaryRoot, "demo");
   const npmCache = join(temporaryRoot, "npm-cache");
+  const nestedNpmEnvironment = { npm_config_cache: npmCache, npm_config_dry_run: "false" };
   mkdirSync(packageDirectory);
   mkdirSync(installDirectory);
 
   const packed = run(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", packageDirectory], root, {
-    npm_config_cache: npmCache,
+    ...nestedNpmEnvironment,
   });
   const manifests = JSON.parse(packed);
   const filename = manifests[0]?.filename;
@@ -37,7 +38,7 @@ try {
   const tarball = join(packageDirectory, filename);
 
   run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", installDirectory, tarball], installDirectory, {
-    npm_config_cache: npmCache,
+    ...nestedNpmEnvironment,
   });
   const executable = process.platform === "win32"
     ? join(installDirectory, "node_modules", ".bin", "polarbear-memory.cmd")

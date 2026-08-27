@@ -76,7 +76,7 @@ npm run sbom:check
     "url": "https://github.com/smartscity/polarbear-memory/issues"
   },
   "bin": {
-    "polarbear-memory": "./dist/cli.js"
+    "polarbear-memory": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -178,7 +178,10 @@ npm run release:check
 npm pack --dry-run
 npm pack
 tar -tf polarbear-memory-0.1.0.tgz
+npm publish --dry-run --access public
 ```
+
+最后一条会完整触发 `prepublishOnly`，但不会占用版本号或写入 Registry；它是正式 publish 前最接近真实流程的演练。内部 tarball smoke test 会显式隔离外层 npm 的 `dry-run` 配置，仍然创建并安装临时 `.tgz`，完成后自动清理。
 
 逐项确认：
 

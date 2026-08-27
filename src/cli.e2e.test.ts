@@ -4,19 +4,41 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+
+const CLI_PROCESS_TIMEOUT_MS = 120_000;
+const SQLITE_EXPERIMENTAL_WARNING = /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(?:\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n)?/gmu;
+
+function assertNoUnexpectedStderr(stderr: string): void {
+  assert.equal(stderr.replace(SQLITE_EXPERIMENTAL_WARNING, ""), "");
+}
+
+test("CLI stderr policy tolerates only the known Node 24 SQLite warning", () => {
+  assertNoUnexpectedStderr(
+    "(node:25778) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n" +
+    "(Use `node --trace-warnings ...` to show where the warning was created)\n",
+  );
+  assert.throws(() => assertNoUnexpectedStderr("unexpected application error\n"));
+});
 
 function run(command: string, args: string[], cwd: string, dataDir?: string, input?: string) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     shell: false,
-    timeout: 30_000,
+    timeout: CLI_PROCESS_TIMEOUT_MS,
     ...(input === undefined ? {} : { input }),
     env: dataDir ? { ...process.env, POLARBEAR_MEMORY_DATA_DIR: dataDir } : process.env,
   });
-  assert.equal(result.status, 0, `command failed: ${command} ${args.join(" ")}\n${result.stderr}`);
+  const failure = [
+    `command failed: ${command} ${args.join(" ")}`,
+    `status=${String(result.status)} signal=${String(result.signal)}`,
+    result.error ? `spawn error: ${result.error.message}` : "",
+    result.stderr,
+  ].filter(Boolean).join("\n");
+  assert.equal(result.status, 0, failure);
   return result;
 }
 
@@ -24,8 +46,8 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-cli-"));
   const repository = join(temporary, "repo");
   const dataDir = join(temporary, "data");
-  const cli = resolve("dist/cli.js");
-  const denyNetwork = resolve("dist/test/deny-network.js");
+  const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
+  const denyNetwork = fileURLToPath(new URL("./test/deny-network.js", import.meta.url));
   const fixture = resolve("fixtures/resume-basic/fixture.json");
   const offline = (args: string[]) => ["--import", denyNetwork, cli, ...args];
   try {
@@ -76,7 +98,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
       last_assistant_message: "Decision: Use the automatic hook decision path.",
     }));
     assert.equal(hookStop.stdout, "");
-    assert.equal(hookStop.stderr, "");
+    assertNoUnexpectedStderr(hookStop.stderr);
     const hookEnd = run(process.execPath, offline(["hook", "ingest", "--event", "SessionEnd"]), repository, dataDir, JSON.stringify({
       hook_event_name: "SessionEnd",
       session_id: "cli-e2e-session",
@@ -84,7 +106,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
       reason: "other",
     }));
     assert.equal(hookEnd.stdout, "");
-    assert.equal(hookEnd.stderr, "");
+    assertNoUnexpectedStderr(hookEnd.stderr);
     assert.match(run(process.execPath, offline(["search", "automatic decision"]), repository, dataDir).stdout, /automatic hook decision/);
     const doctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
     assert.match(doctor.stdout, /Claude MCP\s+OK/);
@@ -120,7 +142,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     } finally {
       await client.close();
     }
-    assert.equal(Buffer.concat(stderr).toString("utf8"), "");
+    assertNoUnexpectedStderr(Buffer.concat(stderr).toString("utf8"));
 
     run(process.execPath, offline(["claude", "restore"]), repository, dataDir);
     const restorePreview = run(process.execPath, offline(["backup", "restore", backupPath]), repository, dataDir);

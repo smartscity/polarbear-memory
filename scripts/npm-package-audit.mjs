@@ -54,7 +54,7 @@ try {
   if (JSON.stringify(metadata.files) !== JSON.stringify(expectedFiles)) failures.push("package.json files allowlist changed.");
   if (metadata.private !== false) failures.push("package.json private must be false.");
   if (metadata.license !== "Apache-2.0") failures.push("package.json license must be Apache-2.0.");
-  if (metadata.bin?.["polarbear-memory"] !== "./dist/cli.js") failures.push("package.json bin target changed.");
+  if (metadata.bin?.["polarbear-memory"] !== "dist/cli.js") failures.push("package.json bin target changed.");
   if (metadata.publishConfig?.access !== "public") failures.push("publishConfig.access must be public.");
   if (metadata.publishConfig?.registry !== "https://registry.npmjs.org/") failures.push("publishConfig.registry must be the official npm registry.");
   if (!readFileSync(join(root, "dist", "cli.js"), "utf8").startsWith("#!/usr/bin/env node\n")) {
