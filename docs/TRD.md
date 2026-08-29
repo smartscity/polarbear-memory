@@ -1066,31 +1066,33 @@ Engine 未运行时，Desktop 可以启动兼容版本的本地 sidecar/service�
 projects.status
 memories.list
 memories.get
+memories.record
 memories.update
 memories.verify
-memories.dispute
-memories.supersede
 memories.archive
-memories.purge_request
-memories.purge_confirm
-contexts.list
+memories.restore
+memories.complete
+memories.feedback
+memories.relate
+memories.purge_preview
+memories.purge
 contexts.explain
+usage.token_savings
+usage.token_savings_reset
+knowledge.promote_preview
 knowledge.promote
-settings.get
-settings.update
-storage.health
-storage.backup_create
-storage.backup_list
-storage.backup_restore
-storage.index_rebuild
-storage.migration_status
+projects.config
+projects.config_update
+maintenance.preview
+maintenance.run
+backups.list / create / verify / restore_preview / restore
 ```
 
 MVP-4 已选择经过审计的 UTF-8 JSON line IPC：每条连接只接受一个以换行结束的 JSON object，请求和响应均限制为 1 MiB；JSON 字符串内换行必须转义。它运行在 user-scoped Unix-domain socket 上，不监听 localhost TCP。服务目录权限为 `0700`，socket 和随机 token 文件为 `0600`；请求使用 constant-time token comparison。Windows named pipe / 当前 SID 绑定留作 MVP-4 后的可移植性增量。
 
-Admin API 1.1 的稳定 capability 为：`projects.status/diagnostics/config/config_update`、`memories.list/get/history/update/verify/archive/restore/relate/purge_preview/purge`、`contexts.explain`、`maintenance.preview/run`、`backups.list/create/verify/restore_preview/restore`、`knowledge.promote_preview/promote` 和 `system.shutdown`。列表/详情仅返回 DTO，不返回数据库路径或表结构。Promote 使用 preview SHA-256 进行二阶段确认并以 exclusive-create 写入；purge 与数据库 restore 都必须 preview 后输入精确确认词。Restore 使用 cooperative maintenance lock 拒绝新的 Engine client，并在检测到活跃 client lease 时失败。
+Admin API 1.2 在 1.1 浏览与治理能力上新增 `memories.record/complete/feedback` 和 `usage.token_savings/token_savings_reset`。稳定 capability 为：`projects.status/diagnostics/config/config_update`、`memories.list/get/record/history/update/verify/archive/restore/complete/feedback/relate/purge_preview/purge`、`contexts.explain`、`usage.token_savings/token_savings_reset`、`maintenance.preview/run`、`backups.list/create/verify/restore_preview/restore`、`knowledge.promote_preview/promote` 和 `system.shutdown`。`memories.record` 接受九种 V2 Knowledge type、temporal validity、file anchor、Evidence ID 和 Entity；业务校验及事务仍全部由 Engine 执行。Token Savings reset 要求精确确认词 `RESET`，只开启新的统计周期。列表/详情仅返回 DTO，不返回数据库路径或表结构。Promote 使用 preview SHA-256 进行二阶段确认并以 exclusive-create 写入；purge 与数据库 restore 都必须 preview 后输入精确确认词。Restore 使用 cooperative maintenance lock 拒绝新的 Engine client，并在检测到活跃 client lease 时失败。
 
-Admin contract 由 Engine 的 `api/admin-v1.json` 管理，Desktop vendored contract 生成 TypeScript capability/DTO 文件；Engine implementation、Desktop Rust allowlist、API version 和生成产物均有 drift gate。跨仓库集成检查必须比较两份 contract 后再运行真实 Rust proxy → Node Engine → SQLite 测试。
+Admin contract 由 Engine 的 `api/admin-v1.json` 与 canonical `api/admin-v1.types.ts` 管理，Desktop vendored contract 生成 TypeScript capability/DTO 文件；Engine implementation、完整 DTO/enums、Desktop Rust allowlist、API version 和生成产物均有 drift gate。跨仓库集成检查必须比较两份 capability contract 与 DTO source 后再运行真实 Rust proxy → Node Engine → SQLite 测试。
 
 涉及 purge、restore、migration 等高风险操作时，Desktop 发起请求并展示影响范围，由用户确认；实际事务、备份验证和审计记录仍由 Engine 完成。
 
@@ -1688,7 +1690,7 @@ Session B 输入“继续昨天的工作”，得到目标、进度、坑和下�
 - Context Pack explain。
 - Desktop 与 Engine capability negotiation。
 
-实现状态（v0.0.5 / v0.1 Admin Console）：可运行工程闭环已完成；Admin API 1.1 提供来源/evidence/revision、可审计编辑、关系、明确批准的 purge、Context Explain、capture/retention 配置、maintenance preview/apply、脱敏 diagnostics、一致性备份创建/校验/恢复和 Engine service 生命周期。Timeline 由按 `updated_at` 倒序且可筛选/搜索的列表提供，Forget 对应可恢复的 archive。Restore 已由跨进程 client lease + maintenance lock 保护。Desktop Native state 绑定当前 canonical workspace，生成式 DTO/allowlist drift gate 防止两仓协议静默偏移。真实用户是否持续使用 Viewer、纠错率是否提高、durable knowledge 产出是否增加，仍必须通过产品试用数据验证，不能由自动化测试替代。
+实现状态（v0.0.5 / v0.1 Admin Console）：可运行工程闭环已完成；Admin API 1.2 提供九种 V2 Knowledge 创建/筛选、temporal validity、file anchor、Evidence/Entity、全部 relation、任务完成/取消、feedback、token savings 查看/重置，以及 1.1 已有的 revision、可审计编辑、验证、archive/restore、明确批准的 purge、Context Explain、capture/retention 配置、maintenance preview/apply、脱敏 diagnostics、一致性备份创建/校验/恢复和 Engine service 生命周期。Timeline 由按 `updated_at` 倒序且可筛选/搜索的列表提供，Forget 对应可恢复的 archive。Restore 已由跨进程 client lease + maintenance lock 保护。Desktop Native state 绑定当前 canonical workspace，canonical DTO/capability/allowlist drift gate 防止两仓协议静默偏移。真实用户是否持续使用 Viewer、纠错率是否提高、durable knowledge 产出是否增加，仍必须通过产品试用数据验证，不能由自动化测试替代。
 
 可运行演示：
 

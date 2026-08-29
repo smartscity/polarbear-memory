@@ -272,6 +272,10 @@ polarbear-memory savings reset --confirm RESET
 
 重置统计不会删除或修改 Memory。
 
+### 在 Polarbear Desktop 完整管理
+
+打开已初始化的 Git 工作区，点击侧边栏的“记忆 / Memory”。Desktop 通过本机 Admin API 1.2 管理 Engine，可以创建和筛选九种 V2 Knowledge、查看 Evidence/Entity/file anchor/有效期、维护全部关系、完成或取消任务、提交 useful feedback，并查看或重置 token savings。Desktop 不直接打开 `memory.db`；所有校验、事务、维护、备份和审计仍由 Memory Engine 执行。
+
 ### 生命周期维护
 
 ```bash

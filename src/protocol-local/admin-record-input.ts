@@ -2,7 +2,6 @@ import type { FileAnchor } from "../domain/lifecycle.js";
 import { MVP_MEMORY_TYPES, type RecordMemoryInput } from "../domain/memory.js";
 import { ApiError } from "./admin-errors.js";
 
-const SOURCE_TYPES = ["CLI", "MCP", "HOOK", "FIXTURE"] as const;
 const COMPLETION_STATES = ["OPEN", "COMPLETED", "CANCELLED"] as const;
 const ENTITY_KINDS = ["MODULE", "FILE", "SYMBOL", "SERVICE", "API", "DATABASE_TABLE", "DEPENDENCY", "ISSUE", "CONCEPT"] as const;
 const ENTITY_ROLES = ["SUBJECT", "AFFECTS", "REFERENCES", "DEPENDS_ON", "RELATED"] as const;
@@ -124,7 +123,7 @@ export function parseRecordMemoryInput(raw: Record<string, unknown>): RecordMemo
     ...(files ? { files } : {}),
     ...(fileAnchors ? { fileAnchors } : {}),
     completionState: enumValue(raw.completionState, "completionState", COMPLETION_STATES, "OPEN"),
-    sourceType: enumValue(raw.sourceType, "sourceType", SOURCE_TYPES, "CLI"),
+    sourceType: "CLI",
     ...(confidence === undefined ? {} : { confidence }),
     ...(importance === undefined ? {} : { importance }),
     ...(commitSha ? { commitSha } : {}),

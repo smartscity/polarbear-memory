@@ -156,11 +156,12 @@ flowchart LR
   Agents["Claude Code / Codex / Cursor / other clients"] --> MCP["Model-independent MCP Server"]
   Desktop["Polarbear Desktop"] --> Socket["Local socket transport"]
   Socket --> AdminRouter["Admin Router"]
+  AdminRouter --> AdminCommands["Admin API 1.2 commands\nV2 create · lifecycle · feedback · savings"]
 
   MemoryCommands --> Facade["SqliteMemoryStore Facade"]
   EventEnvelope --> Facade
   MCP --> Facade
-  AdminRouter --> Facade
+  AdminCommands --> Facade
   Facade --> DB[("memory.db")]
 ```
 

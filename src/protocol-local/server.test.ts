@@ -114,7 +114,7 @@ test("rejects incompatible API major versions without leaking local paths", asyn
   const token = readFileSync(handle.paths.token, "utf8").trim();
   const response = await request(handle, { id: "6", apiVersion: "2.0", token, method: "projects.status", params: { projectRoot: fixture.root } });
   assert.equal(response.ok, false);
-  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: "Memory Admin API 1.1 is required." });
+  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: "Memory Admin API 1.2 is required." });
   assert.doesNotMatch(JSON.stringify(response), new RegExp(fixture.root.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });
 
@@ -143,6 +143,57 @@ test("promotes only after an unchanged explicit preview", async () => {
   });
   assert.equal(written.ok, true);
   assert.equal(readFileSync(join(fixture.root, plan.path), "utf8"), plan.content);
+});
+
+test("manages V2 records, task completion, feedback and resettable token savings", async () => {
+  const fixture = repository();
+  const handle = await startAdminApi(fixture.dataRoot);
+  handles.push(handle);
+  const token = readFileSync(handle.paths.token, "utf8").trim();
+  const recorded = await request(handle, {
+    id: "v2-1", apiVersion: ADMIN_API_VERSION, token, method: "memories.record",
+    params: {
+      projectRoot: fixture.root,
+      type: "TODO",
+      summary: "Add the Desktop token savings card",
+      content: "Show the locally measured candidate baseline and delivered context tokens.",
+      validFrom: "2026-08-29T00:00:00.000Z",
+      files: ["apps/desktop/src/features/memory/MemoryPanel.tsx"],
+      fileAnchors: [{ path: "apps/desktop/src/features/memory/MemoryPanel.tsx", symbol: "MemoryPanel", startLine: 1, endLine: 30 }],
+      entities: [{ kind: "MODULE", canonicalKey: "desktop:memory", displayName: "Desktop Memory", role: "SUBJECT" }],
+    },
+  });
+  assert.equal(recorded.ok, true);
+  const memory = recorded.result as { id: string; validFrom: string; entities: Array<{ entity: { canonicalKey: string } }>; fileAnchors: Array<{ symbol: string }> };
+  assert.equal(memory.validFrom, "2026-08-29T00:00:00.000Z");
+  assert.ok(memory.entities.some((link) => link.entity.canonicalKey === "desktop:memory"));
+  assert.ok(memory.fileAnchors.some((anchor) => anchor.symbol === "MemoryPanel"));
+
+  const feedback = await request(handle, {
+    id: "v2-2", apiVersion: ADMIN_API_VERSION, token, method: "memories.feedback",
+    params: { projectRoot: fixture.root, memoryId: memory.id, useful: true, reason: "Helped validate the Desktop flow." },
+  });
+  assert.equal((feedback.result as { usage: { positiveFeedbackCount: number } }).usage.positiveFeedbackCount, 1);
+  const completed = await request(handle, {
+    id: "v2-3", apiVersion: ADMIN_API_VERSION, token, method: "memories.complete",
+    params: { projectRoot: fixture.root, memoryId: memory.id, state: "COMPLETED", reason: "Desktop support was implemented." },
+  });
+  assert.equal((completed.result as { completionState: string }).completionState, "COMPLETED");
+
+  const savings = await request(handle, {
+    id: "v2-4", apiVersion: ADMIN_API_VERSION, token, method: "usage.token_savings", params: { projectRoot: fixture.root },
+  });
+  assert.equal((savings.result as { estimatedSavedTokens: number }).estimatedSavedTokens, 0);
+  const deniedReset = await request(handle, {
+    id: "v2-5", apiVersion: ADMIN_API_VERSION, token, method: "usage.token_savings_reset",
+    params: { projectRoot: fixture.root, confirmation: "reset" },
+  });
+  assert.equal((deniedReset.error as { code: string }).code, "CONFIRMATION_REQUIRED");
+  const reset = await request(handle, {
+    id: "v2-6", apiVersion: ADMIN_API_VERSION, token, method: "usage.token_savings_reset",
+    params: { projectRoot: fixture.root, confirmation: "RESET" },
+  });
+  assert.equal((reset.result as { resetCount: number }).resetCount, 1);
 });
 
 test("exposes revision history, explainable maintenance, diagnostics and safe backup operations", async () => {
