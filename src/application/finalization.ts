@@ -1,5 +1,6 @@
 import type { MemoryType, RecordMemoryInput } from "../domain/memory.js";
-import type { MemoryStore } from "./ports.js";
+import { isStopEvent } from "../domain/event.js";
+import type { FinalizationMemoryPort } from "./ports.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 
 const LABELS: Array<{ type: MemoryType; pattern: RegExp }> = [
@@ -53,7 +54,7 @@ export function extractCandidates(message: string): RecordMemoryInput[] {
 }
 
 export function finalizeSessionEvents(
-  store: MemoryStore,
+  store: FinalizationMemoryPort,
   projectId: string,
   sessionRefHash: string,
   gitContext: { branchName?: string | undefined; commitSha?: string | undefined; projectRoot?: string | undefined } = {},
@@ -66,7 +67,7 @@ export function finalizeSessionEvents(
   let candidates = 0;
   let recorded = 0;
   for (const event of events) {
-    if (event.eventType === "CLAUDE_STOP") {
+    if (isStopEvent(event.eventType)) {
       const message = typeof event.payload.lastAssistantMessage === "string" ? event.payload.lastAssistantMessage : "";
       for (const candidate of extractCandidates(message)) {
         candidates += 1;
@@ -74,6 +75,7 @@ export function finalizeSessionEvents(
           ...candidate,
           ...(gitContext.branchName ? { branchName: gitContext.branchName } : {}),
           ...(gitContext.commitSha ? { commitSha: gitContext.commitSha } : {}),
+          ...(event.episodeId ? { episodeId: event.episodeId } : {}),
           ...(gitContext.projectRoot && candidate.files && candidate.files.length > 0
             ? { fileAnchors: captureFileAnchors(gitContext.projectRoot, candidate.files, gitContext.commitSha) }
             : {}),

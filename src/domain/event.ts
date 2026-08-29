@@ -1,11 +1,14 @@
-export type RawEventType = "CLAUDE_STOP" | "CLAUDE_SESSION_END";
+import type { AgentKind } from "./knowledge.js";
+
+export type AgentSource = "claude-code" | "codex" | "cursor" | "other";
+export type RawEventType = "AGENT_STOP" | "AGENT_SESSION_END" | "CLAUDE_STOP" | "CLAUDE_SESSION_END";
 
 export interface EventEnvelope {
   id: string;
   schemaVersion: 1;
   projectId: string;
   sessionRefHash: string;
-  agentKind: "claude-code";
+  agentKind: AgentSource;
   eventType: RawEventType;
   payload: Record<string, string | boolean>;
   payloadDigest: string;
@@ -16,4 +19,20 @@ export interface EventEnvelope {
 
 export interface StoredRawEvent extends EventEnvelope {
   processedAt?: string;
+  episodeId?: string;
+}
+
+export function isSessionEndEvent(eventType: RawEventType): boolean {
+  return eventType === "AGENT_SESSION_END" || eventType === "CLAUDE_SESSION_END";
+}
+
+export function isStopEvent(eventType: RawEventType): boolean {
+  return eventType === "AGENT_STOP" || eventType === "CLAUDE_STOP";
+}
+
+export function sessionAgentKind(source: AgentSource): AgentKind {
+  if (source === "claude-code") return "CLAUDE";
+  if (source === "codex") return "CODEX";
+  if (source === "cursor") return "CURSOR";
+  return "OTHER";
 }

@@ -10,7 +10,7 @@ import {
 import type { Memory } from "../domain/memory.js";
 import { digestRepoFile } from "../platform/anchors.js";
 import { changedFilesSince } from "../platform/git.js";
-import type { MemoryStore } from "./ports.js";
+import type { MaintenanceMemoryPort } from "./ports.js";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -23,6 +23,7 @@ function relevance(memory: Memory): number {
   let score = memory.importance;
   if (memory.type === "PITFALL") score = Math.max(score, 650);
   if (memory.type === "DECISION") score = Math.max(score, 600);
+  if (["FACT", "CONSTRAINT", "ARCHITECTURE", "CONVENTION"].includes(memory.type)) score = Math.max(score, 600);
   score += Math.min(memory.usage.selectedCount, 10) * 5;
   score += Math.min(memory.usage.positiveFeedbackCount, 4) * 50;
   score -= Math.min(memory.usage.negativeFeedbackCount, 4) * 50;
@@ -86,7 +87,7 @@ export interface MaintenanceOptions {
 }
 
 export function runMaintenance(
-  store: MemoryStore,
+  store: MaintenanceMemoryPort,
   projectId: string,
   repoRoot: string,
   options: MaintenanceOptions,
@@ -114,7 +115,9 @@ export function runMaintenance(
     const nextLifecycle = archive ? "ARCHIVED" as const : memory.lifecycleStatus;
     const reasonCodes = [...assessed.reasons];
     if (archive) reasonCodes.push("SHORT_TERM_COMPLETED_7D");
-    if (memory.type === "DECISION" || memory.type === "PITFALL") reasonCodes.push("LONG_TERM_AGE_PROTECTED");
+    if (["DECISION", "PITFALL", "FACT", "CONSTRAINT", "ARCHITECTURE", "CONVENTION", "WORKAROUND"].includes(memory.type)) {
+      reasonCodes.push("LONG_TERM_AGE_PROTECTED");
+    }
     const action: MaintenanceAction = {
       memoryId: memory.id,
       previousRisk: memory.correctnessRisk,

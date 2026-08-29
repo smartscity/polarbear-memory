@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { ProjectBinding } from "../platform/project.js";
+import type { ProjectBinding } from "../../platform/project.js";
 
 const MCP_FILE = ".mcp.json";
 const RULE_FILE = join(".claude", "rules", "polarbear-memory.md");

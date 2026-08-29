@@ -151,7 +151,8 @@ v0.1 GA 目标支持：
 
 - macOS。
 - 本地 Git 仓库。
-- Claude Code。
+- Claude Code 的一键配置与自动 lifecycle hooks。
+- 任何能够启动 stdio MCP server 的客户端，包括可手动配置 MCP 的 Codex、Cursor。
 
 用户不需要：
 
@@ -161,7 +162,7 @@ v0.1 GA 目标支持：
 - 配置云数据库、embedding API 或 LLM API key。
 - 安装 CodeGraph。
 
-Codex、Cursor、Linux 和 Windows 计划在 v0.2 支持。
+Codex、Cursor 在 v0.1 已可通过通用 MCP 使用完整 Memory 工具；其一键配置和专属自动 handoff Adapter，以及 Linux、Windows 发行包，计划在 v0.2 支持。
 
 ## 6. 安装
 
@@ -850,7 +851,7 @@ CodeGraph 不可用、版本不兼容或查询失败时，Memory 自动退化到
 
 用户不会在 Polarbear Memory 中看到重复的 `memory_callers`、`memory_callees` 等工具。需要详细代码图谱时，Agent 直接使用 CodeGraph 自己的工具。
 
-## 21. 跨 Agent 使用（v0.2）
+## 21. 跨 Agent 使用
 
 目标体验：
 
@@ -865,9 +866,9 @@ Wednesday
 Cursor 验证代码已经变化，将旧 Memory 标为 stale
 ```
 
-所有 Agent 使用同一数据库和 lifecycle policy，但不同 Adapter 只处理各自的配置与 session event。
+所有 Agent 使用同一 MCP server、数据库和 lifecycle policy。MCP 能力与模型无关；不同 Adapter 只处理各自专属的配置与 session event，不复制 Memory 工具。
 
-用户可以分别启用或停用某个 Agent adapter，不影响其他 Agent。
+用户可以分别启用或停用某个 Agent adapter，不影响其他 Agent。v0.1 只有 Claude Code Adapter；Codex、Cursor 不安装专属 Adapter 时仍可通过 MCP 读写 Memory，只是不具备专属 lifecycle hook 自动采集。
 
 ## 22. Benchmark
 

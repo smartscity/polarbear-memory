@@ -1,5 +1,5 @@
 import type { MemorySearchResult } from "../domain/memory.js";
-import type { MemoryStore } from "./ports.js";
+import type { ContextMemoryPort } from "./ports.js";
 
 export interface CompiledContext {
   markdown: string;
@@ -10,7 +10,7 @@ export interface CompiledContext {
 }
 
 interface ContextSection {
-  heading: "Warnings" | "Relevant memory";
+  heading: "Warnings" | "Current truth" | "Relevant constraints" | "Relevant decisions" | "Known pitfalls" | "Current work" | "Historical context";
   text: string;
   id: string;
 }
@@ -23,9 +23,15 @@ export function estimateTokens(text: string): number {
 
 function renderItem(result: MemorySearchResult): string {
   const memory = result.memory;
-  const source = [memory.commitSha?.slice(0, 12), ...memory.files].filter(Boolean).join(", ") || memory.sourceType;
+  const evidence = memory.evidence
+    .filter((link) => link.role !== "ORIGIN" || memory.evidence.length === 1)
+    .slice(0, 3)
+    .map((link) => link.evidence.sourceRef ?? link.evidence.type);
+  const entity = memory.entities.slice(0, 4).map((link) => link.entity.displayName);
+  const source = [memory.commitSha?.slice(0, 12), ...memory.files, ...evidence].filter(Boolean).join(", ") || memory.sourceType;
   const quotedContent = memory.content.split(/\r?\n/u).map((line) => `  > ${line}`).join("\n");
-  return `- **[${memory.type}] ${memory.summary}**\n${quotedContent}\n  Source: ${source} · Memory: ${memory.id}`;
+  const concerns = entity.length > 0 ? `\n  Entities: ${entity.join(", ")}` : "";
+  return `- **[${memory.type}] ${memory.summary}**\n${quotedContent}\n  Evidence: ${source}${concerns} · Memory: ${memory.id}`;
 }
 
 function renderWarning(result: MemorySearchResult): string {
@@ -39,14 +45,14 @@ function renderWarning(result: MemorySearchResult): string {
 }
 
 function renderBody(sections: ContextSection[]): string {
-  return ["Warnings", "Relevant memory"].map((sectionHeading) => {
+  return ["Warnings", "Current truth", "Relevant constraints", "Relevant decisions", "Known pitfalls", "Current work", "Historical context"].map((sectionHeading) => {
     const items = sections.filter((item) => item.heading === sectionHeading);
     return items.length > 0 ? `## ${sectionHeading}\n\n${items.map((item) => item.text).join("\n\n")}` : "";
   }).filter(Boolean).join("\n\n");
 }
 
 export function compileContext(
-  store: MemoryStore,
+  store: ContextMemoryPort,
   projectId: string,
   task: string,
   budget: number,
@@ -79,8 +85,21 @@ export function compileContext(
   const orderedCandidates = [...warnings, ...relevant];
   const allSections: ContextSection[] = orderedCandidates.map((candidate) => {
     const warning = candidate.memory.correctnessRisk === "HIGH" || candidate.memory.verificationState === "DISPUTED";
+    const heading: ContextSection["heading"] = warning
+      ? "Warnings"
+      : candidate.memory.lifecycleStatus === "SUPERSEDED"
+        ? "Historical context"
+        : candidate.memory.type === "CONSTRAINT"
+          ? "Relevant constraints"
+          : candidate.memory.type === "DECISION" || candidate.memory.type === "ARCHITECTURE" || candidate.memory.type === "CONVENTION"
+            ? "Relevant decisions"
+            : candidate.memory.type === "PITFALL" || candidate.memory.type === "WORKAROUND"
+              ? "Known pitfalls"
+              : candidate.memory.type === "TASK_STATE" || candidate.memory.type === "TODO"
+                ? "Current work"
+                : "Current truth";
     return {
-      heading: warning ? "Warnings" : "Relevant memory",
+      heading,
       text: warning ? renderWarning(candidate) : renderItem(candidate),
       id: candidate.memory.id,
     };

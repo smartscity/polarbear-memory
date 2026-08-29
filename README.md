@@ -17,7 +17,7 @@ Polarbear Memory 是面向 AI 编程 Agent 的本地长期记忆引擎。
 
 ## 能做什么
 
-- **项目长期记忆**：记录 `DECISION`、`PITFALL`、`TASK_STATE` 和 `TODO`。
+- **混合知识模型**：记录事实、决策、约束、架构、约定、失败经验、任务状态和 TODO，并关联 Episode、Evidence 与 Engineering Entity。
 - **按任务提供上下文**：根据任务和 token budget 编译短 Context Pack。
 - **MCP 集成**：Agent 可以搜索、读取、记录和验证 Memory。
 - **自动 handoff**：Claude Code session 结束时，本地提取明确标记的决策、踩坑、进度和下一步。
@@ -73,7 +73,9 @@ polarbear-memory init
 
 初始化会在仓库中创建 `.polarbear/config.toml`。`memory.db` 不放进项目仓库，而是由 Memory Engine 保存在操作系统的当前用户数据目录。
 
-### 2. 启用 Claude Code MCP
+### 2. 启用 Claude Code（可选专属 Adapter）
+
+Memory Engine 与 MCP server 不依赖 Claude Code。以下命令只是为 Claude 自动安装通用 MCP 配置、规则和专属 lifecycle hooks；使用 Codex、Cursor 或其他 MCP 客户端时可跳过本节，直接按后文配置同一个 `polarbear-memory mcp --stdio`。
 
 自动配置前先预览：
 
@@ -148,6 +150,8 @@ polarbear-memory claude install
 
 ### 其他 MCP 客户端：手动配置
 
+MCP 工具与模型无关，不需要为 Codex、Cursor 等客户端安装另一份 Memory adapter。只有客户端提供专属 lifecycle hook、且需要自动 handoff 时，才需要对应的 `adapters/<agent>` 集成。
+
 先在目标 Git 仓库运行一次 `polarbear-memory init`，然后把下面的 stdio server 加入客户端配置：
 
 ```json
@@ -216,6 +220,11 @@ polarbear-memory record \
 
 - `DECISION`：已经形成的工程决策。
 - `PITFALL`：失败方案、风险或容易重复踩的坑。
+- `FACT`：由当前证据支持的工程事实。
+- `CONSTRAINT`：必须满足的技术或业务约束。
+- `ARCHITECTURE`：系统结构与组件边界。
+- `CONVENTION`：团队或项目约定。
+- `WORKAROUND`：暂时绕过问题的方案。
 - `TASK_STATE`：当前任务进度。
 - `TODO`：明确且尚未完成的下一步。
 

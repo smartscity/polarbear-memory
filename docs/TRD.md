@@ -1,10 +1,10 @@
 # Polarbear Memory 技术需求文档（TRD）
 
 > **对应 PRD**：[Polarbear Memory PRD](./PRD.md)
-> **版本**：v1.0 Draft
-> **文档日期**：2026-08-16
-> **状态**：待评审；评审通过前不进入产品实现
-> **目标首发**：Polarbear Memory v0.1
+> **版本**：v2.0
+> **文档日期**：2026-08-28
+> **状态**：V2 实现基线；schema v7
+> **目标版本**：Polarbear Memory V2
 
 ---
 
@@ -32,6 +32,26 @@ Polarbear Memory 最终是一个本地 AI Engineering Knowledge Runtime：
 - 中间以 Memory Lifecycle、Retrieval 和 Context Compiler 形成产品壁垒。
 - 默认离线、可审计、可导出、可删除，不依赖 Polarbear Desktop 或云账户。
 
+V2 将内部模型从 Everything is Memory 升级为 **Fact + Episode + Entity Hybrid Knowledge Model**。产品与 MCP 继续使用 Memory 这个用户概念；数据库内部的长期知识正式称为 Knowledge Unit。
+
+```mermaid
+flowchart TD
+    S["Sources: Claude / Cursor / Codex / Git / CI"] --> SE[Session]
+    SE --> EP[Episode]
+    EP --> EV[Evidence]
+    EV --> K[Knowledge Unit]
+    K --> KV[Knowledge Version]
+    K --> EN[Engineering Entity]
+    K --> KR[Knowledge Relation]
+    K --> KA[Knowledge Anchor]
+    KV --> R[Derived Retrieval Layer]
+    EN --> R
+    KR --> R
+    KA --> R
+    R --> CC[Context Compiler]
+    CC --> AI["Claude / Cursor / Codex"]
+```
+
 ```text
 ┌────────────────────────────────────────────────────────────┐
 │ Clients                                                    │
@@ -58,7 +78,7 @@ Polarbear Memory 最终是一个本地 AI Engineering Knowledge Runtime：
 
 1. Core 不依赖 Polarbear Desktop、Claude Code 或任一特定 Agent。
 2. Memory Engine 是 `memory.db` 的唯一所有者和读写者；Polarbear Desktop 通过完整的 Admin API / SDK 管理 Memory Engine，而不是直接执行 SQL。
-3. SQLite 是 operational memory 的唯一事实源；FTS 是可重建索引。
+3. SQLite 中的 Session、Episode、Evidence 与 Knowledge 是 canonical truth；FTS、Entity 检索投影和未来 Vector/Graph Projection 都是可删除、可重建索引。
 4. Durable Markdown 是发布/审阅投影，不是数据库的隐式副本。
 5. Runtime 默认不具备网络出口；网络能力必须是独立、显式、可审计的 provider。
 6. Memory 内容永远是不可信数据，不能被当作命令或系统指令执行。
@@ -83,7 +103,7 @@ Polarbear Memory 最终是一个本地 AI Engineering Knowledge Runtime：
 | 主语言 | TypeScript / Node.js control plane | 最快验证 CLI、MCP、Hooks、Admin API；与 Polarbear 前端技术栈一致 | profiling 达到门槛后增加可选 Rust kernel，不重写控制面 |
 | 进程模型 | CLI / MCP stdio 进程直接调用 Core | 最少安装面，无 daemon 生命周期 | Viewer/多 Agent 并发出现后引入 local service |
 | 数据库 | 固定 Node runtime 的 `node:sqlite` + FTS5 | 无额外 native npm addon，本地、事务、无服务依赖 | 启动时做 FTS5 capability self-test；Node API 不满足时再评估 binding |
-| 检索 | FTS5 + metadata + relation + heuristic ranking | 可解释、低成本、便于 benchmark | 召回不足被数据证明后加 hybrid retrieval |
+| 检索 | FTS5 + Entity recall + metadata + 1-hop relation + temporal/lifecycle filter | 可解释、离线、无需 vector dependency | benchmark 证明 recall 不足后再增加 derived vector index |
 | Git | 调用本机 `git`，仅固定只读子命令 | 避免 libgit2 依赖与许可证/原生构建面 | 性能不达标再评估 gitoxide/libgit2 |
 | MCP | 官方 TypeScript SDK，stdio transport only | 与 JSON/Node 控制面自然衔接 | SDK 不稳定时由内部 protocol facade 隔离 |
 | Agent 首发 | Claude Code | 单点验证自动 capture/resume | v0.2 增加 Codex、Cursor adapter |
@@ -138,7 +158,8 @@ polarbear-memory/
     lifecycle/
     security/
     protocol-mcp/
-    adapter-claude-code/
+    adapters/
+      claude-code/
     api-local/                 # MVP-4 才启用
   apps/
     cli/
@@ -163,7 +184,7 @@ polarbear-memory/
 ```text
 apps/cli ───────────────┐
 protocol-mcp ───────────┼──► application ─► domain
-adapter-claude-code ────┘          │
+adapters/claude-code ───┘          │
                                    ├──► retrieval ─► domain
                                    ├──► context-compiler ─► domain
                                    ├──► extractor ─► domain
@@ -242,21 +263,24 @@ Rust kernel 只接受有界 DTO，返回确定性结果，不拥有数据库 sch
 
 核心实体：
 
+- `Workspace`
 - `Project`
 - `Session`
-- `Task`
-- `Memory`
-- `MemoryRevision`
+- `Episode`
 - `Evidence`
-- `FileAnchor`
-- `MemoryRelation`
+- `KnowledgeUnit`（对外兼容名 `Memory`）
+- `KnowledgeVersion`
+- `Entity`
+- `KnowledgeRelation`
+- `KnowledgeAnchor`
+- `LifecycleAssessment`
 - `ContextPack`
-- `RetrievalFeedback`
 
 核心 value objects：
 
 - `ProjectId`
-- `MemoryId`
+- `KnowledgeId / MemoryId`
+- `CanonicalEntityKey`
 - `CanonicalRepoIdentity`
 - `BranchScope`
 - `LifecycleStatus`
@@ -266,6 +290,7 @@ Rust kernel 只接受有界 DTO，返回确定性结果，不拥有数据库 sch
 - `StalenessRisk`
 - `TokenBudget`
 - `ContentFingerprint`
+- `ValidTime`
 
 任何 `confidence`、`importance` 和 `risk` 必须在构造时验证范围，避免“数据库里约定 0–1、代码里随意写 float”。
 
@@ -397,127 +422,168 @@ PRAGMA trusted_schema = OFF;
 
 Node 官方 `node:sqlite` 在 Node 24 文档中仍标为 release candidate，因此必须固定并捆绑验证过的 Node patch version，不能使用用户机器上的任意 Node。官方 API 默认关闭 extension loading，并提供 defensive、timeout、backup 和 runtime limits；这些能力都必须进入兼容性测试。参考 [Node.js `node:sqlite`](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html)。
 
-### 8.3 Schema v1 草案
+### 8.3 Polarbear Memory V2 Architecture
 
-#### `projects`
+#### Current State Analysis 与复用决策
 
-```text
-id, display_name, identity_kind, identity_value,
-canonical_root_hash, created_at, last_seen_at, schema_version
+V2 开工前的实现是 schema v6：`memories` 同时保存知识正文、来源类型、Git commit/branch、lifecycle snapshot 和 FTS content source；`memory_revisions/memory_relations/memory_anchors/lifecycle_assessments` 已经提供了版本、演化、代码锚定和审计基础；`raw_events` 是短期、可重放 ingestion buffer；检索只有 summary/content/type FTS 与逐条 hydrate。
+
+实施决策：保留 SQLite/WAL/backup/rollback、公开 Memory API、raw event buffer、四层 lifecycle、FTS tokenizer-safe builder 和 anchor digest；迁移 revision/relation/anchor/assessment 数据到 Knowledge 模型；把 commit/branch 移出 Knowledge identity；用独立 FTS projection、Entity recall、bounded relation expansion 和 batch hydration 替换 v1 retrieval；旧表仅作为一个兼容周期的 `legacy_*_v1` 安全副本，不再 read/write 或 dual-write。
+
+V2 的关键边界不是表数量，而是明确回答不同问题：
+
+| 对象 | 语义 | 是否长期知识 |
+| --- | --- | --- |
+| Session | 一次 Agent interaction | 否 |
+| Episode | 发生过的一件事 | 否 |
+| Evidence | 为什么相信或质疑一条知识 | 否 |
+| Knowledge Unit | 可长期召回的事实、决策、约束、经验或任务状态 | 是 |
+| Knowledge Version | 同一知识内容如何被编辑 | 历史版本 |
+| Knowledge Relation | 不同知识如何替代、冲突、扩展或依赖 | 是 |
+| Entity | 知识涉及的稳定工程对象 | 是 |
+| Anchor | 某条知识在代码中的具体定位 | 是 |
+| Lifecycle Assessment | 知识当前是否仍可信、相关 | 审计事实 |
+
+写入链路是渐进式的：完整自动采集使用 `Raw Event → Session → Episode → Evidence → Knowledge`；Human CLI/MCP 直接记录 Memory 时，Engine 内部自动创建 `USER_STATEMENT` 或 `AGENT_RESULT` Evidence 和对应 Episode，因此不会把上层 API 复杂度暴露给用户。
+
+### 8.4 Canonical Storage Model（schema v7）
+
+SQLite 继续是唯一 canonical truth，不引入 PostgreSQL、Neo4j、外部 vector database、Redis 或额外 daemon。核心 schema 实现在 `src/storage/schema-v2.ts`，v6→v7 migration 位于 `src/storage/migrate-v2.ts`。
+
+```mermaid
+erDiagram
+    WORKSPACES ||--o{ PROJECTS : contains
+    PROJECTS ||--o{ SESSIONS : runs
+    PROJECTS ||--o{ EPISODES : observes
+    SESSIONS o|--o{ EPISODES : groups
+    EPISODES o|--o{ EVIDENCE : produces
+    WORKSPACES ||--o{ KNOWLEDGE_UNITS : owns
+    PROJECTS ||--o{ KNOWLEDGE_UNITS : scopes
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_VERSIONS : versions
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_EVIDENCE : justified_by
+    EVIDENCE ||--o{ KNOWLEDGE_EVIDENCE : supports
+    PROJECTS ||--o{ ENTITIES : defines
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_ENTITIES : concerns
+    ENTITIES ||--o{ KNOWLEDGE_ENTITIES : referenced_by
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_RELATIONS : from
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_RELATIONS : to
+    KNOWLEDGE_UNITS ||--o{ KNOWLEDGE_ANCHORS : anchored_by
+    ENTITIES o|--o{ KNOWLEDGE_ANCHORS : locates
+    KNOWLEDGE_UNITS ||--o{ LIFECYCLE_ASSESSMENTS : assessed_by
 ```
 
-不默认存储完整 home path 作为可同步 identity；本地调试信息与跨设备 identity 分离。
+#### 8.4.1 Workspace 与 Project
 
-#### `sessions`
+`workspaces(id, name, created_at, updated_at)` 为未来 cross-repository/team memory 保留 ownership boundary。当前只有无用户复杂度的 `local` workspace。
 
-```text
-id, project_id, agent_kind, external_session_ref_hash,
-branch_name, head_start, head_end, started_at, ended_at,
-capture_status, finalization_version
-```
+`projects(id, workspace_id, display_name, identity_kind, identity_value, created_at, last_seen_at, schema_version)` 保持 repository 的稳定 identity。完整 home path 不作为跨设备 identity。
 
-#### `tasks`
+#### 8.4.2 Session 与 Episode
 
-```text
-id, project_id, normalized_title, status, branch_scope,
-created_at, updated_at, completed_at
-```
+`sessions` 保存 agent_kind、经过 hash 的外部 session reference、branch/head 起止、开始结束时间和 capture status。Agent kind 只使用 `CLAUDE/CURSOR/CODEX/OTHER`，Core 不依赖具体 Agent 实现。
 
-#### `memories`
+`episodes` 是尽量 immutable 的“发生过的事情”，支持 session end、用户决策、Git commit、test/CI、merge、file change、incident 和 tool result。大型 payload 不重复落库，只保留 digest、summary 与可选 `payload_ref`。
 
-```text
-id, project_id, task_id?, session_id?, type,
-summary, content, scope_kind, branch_pattern?,
-confidence_milli, importance_milli,
-lifecycle_status, verification_state,
-source_type, source_ref_hash?, commit_sha?,
-content_hash, created_at, updated_at, last_verified_at?,
-review_after?, archived_at?, lifecycle_reason?,
-supersedes_id?, extractor_version
-```
+`raw_events` 继续作为短期 ingestion buffer；它与 Episode 不重复：Raw Event 可过期、可重放、可能尚未处理，Episode 是规范化 domain event。Claude hook 接收成功时在同一事务中 upsert Session 并生成 Episode。
 
-`confidence` 和 `importance` 建议存整数 0–1000，避免跨语言 float 比较漂移。
+#### 8.4.3 Evidence
 
-#### 关系与证据
+`evidence` 保存结构化 type、source reference、digest、observed time、commit、trust level 和小型扩展 metadata。核心可查询字段不进入 JSON。
+
+`knowledge_evidence` 是多对多关系，role 限制为 `ORIGIN/SUPPORTS/VERIFIES/CONTRADICTS/INVALIDATES`。一条 Knowledge 可以由文件、ADR、测试和 commit 联合支持；同一测试 Evidence 也可以支持多条 Knowledge。
+
+#### 8.4.4 Knowledge Unit 与 Version
+
+`knowledge_units` 是长期知识 identity 和当前 snapshot，kind 至少支持：
 
 ```text
-memory_revisions(id, memory_id, revision_no, content, summary,
-                 reason, actor_kind, created_at)
-
-memory_relations(id, from_memory_id, relation_type,
-                 to_kind, to_ref, confidence_milli, created_at)
-
-evidence(id, project_id, evidence_type, ref, digest,
-         observed_at, commit_sha?, metadata_json)
-
-memory_evidence(memory_id, evidence_id, role)
-
-file_anchors(id, memory_id, repo_relative_path, symbol?,
-             start_line?, end_line?, content_digest,
-             anchor_version, last_checked_commit?)
+DECISION / PITFALL / FACT / CONSTRAINT / ARCHITECTURE
+CONVENTION / TASK_STATE / TODO / WORKAROUND
 ```
 
-#### 检索与评测
+它保存 current summary/body、scope、lifecycle、verification、correctness risk、定点分数、valid time 和 system time。`commit_sha` 与 `branch_name` 不再承担 Knowledge identity，而进入 Evidence/Session/Anchor。
+
+`knowledge_versions` 保存完整版本历史和 content hash，`UNIQUE(knowledge_id, version_no)`。修改 typo、summary 或同一结论的补充创建新 Version；“FAILED may retry”被“FAILED is terminal”替代时，必须创建新 Knowledge 并建立 `SUPERSEDES`，不能伪装成同一 identity 的文字编辑。
+
+#### 8.4.5 Entity 与 Anchor
+
+第一阶段只建模 Engineering Entity：
 
 ```text
-context_packs(id, project_id, task_digest, budget_tokens,
-              estimated_tokens, compiler_version, created_at)
-
-context_pack_items(context_pack_id, memory_id, rank,
-                   score_milli, section, included_tokens,
-                   selection_reasons_json)
-
-retrieval_feedback(id, context_pack_id, memory_id,
-                   feedback_kind, actor_kind, created_at)
-
-memory_usage_stats(memory_id, candidate_count, selected_count,
-                   positive_feedback_count, negative_feedback_count,
-                   last_candidate_at?, last_selected_at?, last_positive_at?,
-                   updated_at)
-
-context_token_savings(project_id, context_pack_count,
-                      candidate_count, selected_count,
-                      baseline_tokens, context_tokens,
-                      estimated_saved_tokens, measurement_started_at,
-                      last_context_at?, reset_count)
-
-lifecycle_assessments(id, memory_id, policy_version,
-                      correctness_risk_milli, relevance_score_milli,
-                      proposed_action, reason_codes_json,
-                      checked_commit?, assessed_at)
+MODULE / FILE / SYMBOL / SERVICE / API
+DATABASE_TABLE / DEPENDENCY / ISSUE / CONCEPT
 ```
 
-`memory_usage_stats` 是可重建的使用统计，不代表事实正确性；`lifecycle_assessments` 保存每次自动判断的输入摘要、原因和结果，保证归档与降权可解释、可回放。不得仅因为一条 Memory 长期未被召回，就把它判定为错误。
+`entities.canonical_key` 在 project 内唯一，例如 `file://src/a.ts`、`symbol://src/a.ts#handle`、`service://SettlementService`。display name 只用于展示，不作为 identity。
 
-#### Raw events
+`knowledge_entities` 使用 `SUBJECT/AFFECTS/REFERENCES/DEPENDS_ON/RELATED` 五种有界 role。Entity-aware retrieval 通过稳定 key/display name 找 Entity，再批量取得 Knowledge。
+
+`knowledge_anchors` 表示 Knowledge 在代码中的具体定位，保存 entity、repo-relative path、可选 symbol/line hint、digest 和 commit。Entity 是稳定工程对象；Anchor 是知识的代码位置；Evidence 是相信知识的依据，三者不能合并。行号仅为提示，symbol + digest + Git 才是主要 identity 信号。
+
+#### 8.4.6 Relation 与 Temporal Model
+
+`knowledge_relations` 只允许：
+
+- `SUPERSEDES`：新知识取代旧 current truth，并把旧 Knowledge 标为 `SUPERSEDED`、关闭 valid time。
+- `CONTRADICTS`：存在冲突但不能确认赢家；双方进入 disputed。
+- `EXTENDS`：A 补充 B，B 仍有效。
+- `DERIVES`：A 从 B 推导。
+- `DEPENDS_ON`：A 成立依赖 B。
+- `RELATED_TO`：仅用于弱 retrieval expansion。
+
+禁止 self relation；`SUPERSEDES` 与 `DERIVES` 使用 recursive CTE 防 cycle。Relation expansion 目前固定最多一跳，不执行无界图遍历。
+
+Valid time 使用 `valid_from/valid_to` 表示知识在现实规则中何时成立；system time 使用 `created_at/updated_at/archived_at` 表示 Polarbear 何时知道或修改。默认检索只取当前 valid、`ACTIVE` Knowledge；显式历史查询才允许 `SUPERSEDED` 或已结束 valid time。
+
+#### 8.4.7 Lifecycle 与 Operational Metadata
+
+`lifecycle_assessments.knowledge_id` 指向 Knowledge Unit，保留 previous/new lifecycle、previous/new risk、relevance、checked commit、reason codes、policy/assessor version 和 assessed time。Usage statistics 与 token savings 是 operational/derived measurement，不代表知识正确性。
+
+### 8.5 Derived Retrieval Layer
+
+Canonical data 与 retrieval projection 严格分离：
 
 ```text
-raw_events(id, project_id, session_id, event_type,
-           payload_redacted_json, payload_digest,
-           occurred_at, expires_at, ingestion_version)
+Query Context
+  → Hard Filter
+  → FTS Recall
+  → Entity Recall
+  → Metadata Recall
+  → 1-hop Relation Expansion
+  → Temporal / Lifecycle Filter
+  → Stable Ranking
+  → Dedup / Diversity
+  → Context Compiler
 ```
 
-raw event 只承载短期提取需要，默认 7 天过期；`retention_days = 0` 时 finalization 后立即删除。
+`knowledge_search_documents` 与 `knowledge_fts` 是 derived projection，索引 summary、body、kind、Entity display/canonical key、anchor path/symbol 和 scope。它们可以整体删除后由 `rebuildSearchIndex()` 从 Knowledge/Entity/Anchor canonical tables 重建，不能反向成为事实源。
 
-### 8.4 FTS5
+检索先用 tokenizer-safe FTS query builder 做 lexical recall，再用 deterministic identifier token 匹配 Entity，合并 seed 后只扩展 `SUPERSEDES/CONTRADICTS/EXTENDS/DEPENDS_ON` 一跳。候选通过 current/historical temporal mode、lifecycle 和 completion hard filter，再按 Entity/FTS source、correctness risk、relevance、importance、updated time 和 ID 稳定排序。批量 hydration 一次加载 Anchor、Relation、Evidence、Entity、Usage、Version count 和最新 Assessment，避免按 Knowledge 执行 N+1 query。
 
-索引字段：
+Context Compiler 按 `Warnings / Current truth / Relevant constraints / Relevant decisions / Known pitfalls / Current work / Historical context` 分区，并展示 Evidence、Entity 与 Memory ID。HIGH risk 或 disputed 只能进入 Warning；历史 Knowledge 只在明确历史查询中出现。
 
-- `summary`
-- `content`
-- `type`
-- file path tokens
-- symbol tokens
-- task title
+未来 vector boundary 定义为 derived `knowledge_embeddings(knowledge_id, model_id, model_version, dimension, content_hash, embedding_blob_or_ref, created_at)`。本阶段不引入 embedding 或 vector dependency；只有 benchmark 证明 FTS + Entity + Relation recall 不够时才实现，且可以无损删除重建。
 
-要求：
+### 8.6 V1 → V2 Migration
 
-- canonical table 保留原文，FTS 表可删除重建。
-- query 先经过 tokenizer-safe builder，不把用户字符串直接当 FTS 语法。
-- 限制 query 长度、token 数、prefix search 和 result count，避免 pathological query。
-- 中英文首版使用 SQLite 默认 tokenizer 的实际 benchmark 决定是否增加经过许可审计的 tokenizer；不先引入复杂分词库。
+实际 next schema version 是 `7`。Engine 打开 v0–v6 数据库时先创建 SQLite-consistent preflight backup，再在单个 `BEGIN IMMEDIATE` transaction 内执行：
 
-### 8.5 删除语义
+```text
+memories             → knowledge_units
+memory_revisions     → knowledge_versions
+memory_relations     → knowledge_relations
+memory_anchors/files → knowledge_anchors + FILE entities
+memory_usage_stats   → knowledge_usage_stats
+lifecycle_assessments(memory_id) → lifecycle_assessments(knowledge_id)
+```
+
+每条旧 Memory 同时生成 migration Episode、origin Evidence 和 `knowledge_evidence` link；旧 commit/branch 进入 Evidence metadata，不再留在 Knowledge identity。每条 Knowledge 必须至少有一个 Version。关系、anchor、usage、raw event、maintenance cursor、token savings 和 purge audit 均保留。
+
+迁移完成前不删除旧表，而是重命名为 `legacy_*_v1`；运行时所有 read/write 已切到 V2 表。迁移校验 Knowledge count、Version completeness、migration checksum 和 `PRAGMA foreign_key_check` 后才提交 schema version。任何错误都 rollback transaction；文件数据库额外恢复 preflight backup，并保留失败数据库供诊断。
+
+Fresh v7 数据库不创建 `memories`。产品、MCP、CLI 和 Admin API 仍暴露 Memory abstraction，由 compatibility mapping 映射到 Knowledge Unit，因此现有 `record/search/get/update/archive/restore/verify/forget` 调用不破坏。
+
+### 8.7 删除语义
 
 - `archive`：逻辑隐藏，可恢复。
 - `forget`：默认建立删除 tombstone 并从检索/导出排除。
@@ -702,11 +768,9 @@ Verification 是正交维度：`UNVERIFIED / VERIFIED / DISPUTED`。
 | `TASK_STATE` | 每个 task/scope 仅保留一个活跃状态；任务完成后立即退出默认 Context，7 天后自动归档 | 不能把旧进度与新进度同时作为当前状态 |
 | `TODO` | 完成或取消后立即退出默认 Context，7 天后归档；未完成 TODO 不因年龄自动消失 | 不能仅因长期未完成就自动标记已完成 |
 | `WORKAROUND` | 默认 14 天进入复核；相关代码、配置或依赖变化立即 stale | 不能长期作为无警告的正式方案 |
-| `FACT` / `COMMAND` | 依赖 anchor/evidence 检查；无 anchor 且 90 天未验证时进入复核队列 | 时间到期不能直接判错 |
+| `FACT` / `CONSTRAINT` | 依赖 anchor/evidence 检查；来源变化时进入复核队列 | 时间到期不能直接判错 |
 | `DECISION` / `ARCHITECTURE` / `CONVENTION` | 不设置纯时间自动归档；通过 source change、supersede 或人工判断退出活跃集合 | 不能因为“很久没用”自动删除 |
-| `PITFALL` / `FAILURE` | 长期保留，相关实现变化后 stale；被新证据证明不再适用时 supersede/archive | 不能因为低频而丢失罕见但高代价经验 |
-| `PREFERENCE` | scope 或用户明确变更时 supersede；不使用固定 TTL | 不能从一次 Agent 行为推断偏好已改变 |
-| `CANDIDATE`（任意类型） | 30 天未接受、无后续 evidence 且从未被选用时自动归档 | 不能自动提升为 verified |
+| `PITFALL` | 长期保留，相关实现变化后 stale；被新证据证明不再适用时 supersede/archive | 不能因为低频而丢失罕见但高代价经验 |
 
 上述天数是 v0.1 安全默认值，可由用户级 policy 收紧或放宽；repo 内配置不能要求物理 purge，也不能放宽安全上限。Durable Knowledge Markdown 不受自动归档控制，只通过 Git review 修改。
 
@@ -776,10 +840,10 @@ Task normalization
   └─ branch/project scope
           │
           ▼
-Hard filters → FTS recall → metadata recall → relation expansion
+Hard filters → FTS recall → Entity recall → metadata recall → bounded relation expansion
           │
           ▼
-Stale assessment → scoring → dedup/diversity → section allocation
+Temporal/lifecycle filter → scoring → dedup/diversity → section allocation
           │
           ▼
 Compression → token guard → source/warning audit → Context Pack
@@ -810,13 +874,13 @@ Compression → token guard → source/warning audit → Context Pack
 
 ### 12.3 Compression
 
-不在 v0.1 调用外部 LLM 做即时摘要。每条 memory 写入时已有：
+不调用外部 LLM 做即时摘要。每条 Knowledge 写入时已有：
 
 - `summary`：1–3 句，适合 Pack。
-- `content`：完整但仍结构化的知识。
+- `body`（对外兼容字段 `content`）：完整但仍结构化的知识。
 - `evidence`：按需展开。
 
-Context Compiler 只做确定性组装、长度裁剪和段落选择。若 summary 超标，将整条排除或使用预先验证的 `compact_summary`，不从中间截断产生歧义。
+Context Compiler 只做确定性组装、Evidence/Entity 来源展示、长度裁剪和段落选择。若 summary 超标，将整条排除，不从中间截断产生歧义。
 
 ### 12.4 Token Estimator
 
@@ -902,6 +966,8 @@ MCP TypeScript SDK 仍在持续演进，因此：
 - 只导入 stdio server 所需 package；若依赖图或 bundle 意外引入 HTTP server/client middleware，CI 必须失败。
 
 ## 14. Claude Code Adapter
+
+该 Adapter 不是 MCP 实现，也不是 Core 的必选依赖。通用 MCP 位于 `protocol-mcp`，对 Claude Code、Codex、Cursor 和其他 MCP client 使用同一工具合约。`adapters/claude-code` 仅负责 Claude 专属的 `.claude` 配置、规则和 `Stop` / `SessionEnd` hook 转换；未安装它时，CLI、MCP、Desktop 与手动 Memory 仍正常工作，只失去 Claude 自动 handoff。
 
 ### 14.1 安装
 
@@ -1724,6 +1790,8 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 - migration 支持 preflight、backup、apply、verify、rollback-on-failure。
 - destructive column/data removal 至少延迟一个 minor release。
 - FTS 与 derived cache 不进入不可逆 migration，可重建。
+- schema v7 将 v1 表重命名为 `legacy_*_v1`，至少保留一个兼容周期；运行时不得 dual-write。
+- schema migration 必须校验 Knowledge count、每条 Knowledge 的 Version、关系/Anchor 保留和 `PRAGMA foreign_key_check`。
 
 ### 26.2 API / MCP
 
@@ -1731,6 +1799,7 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 - 删除/改语义先增加 capability flag 和 deprecation warning。
 - local API 每次连接协商 major/minor。
 - DTO 带 `schema_version`，数据库 row 不直接序列化为 wire format。
+- 对外 `Memory` 名称保持稳定；内部 `KnowledgeUnit` 字段通过 adapter 映射，不能把数据库表名泄漏为 breaking change。
 
 ### 26.3 Config
 
@@ -1803,8 +1872,11 @@ Agent 自动产生候选 → Polarbear 显示来源/证据 → 用户验证或�
 
 ## 30. 最终技术建议
 
-首个实现应严格从 **MVP-0 / v0.0.1 Memory Loop** 开始：一个 TypeScript CLI、一份由固定 Node `node:sqlite` 管理的 SQLite 数据库、四种 memory、一个 Context Compiler 和一组可重复 benchmark fixture。开发时使用固定 Node，发行验证同时提供捆绑 Node 的 `polarbear-memory` launcher；它不需要 Claude hooks、Polarbear UI、daemon、CodeGraph、embedding、Rust 或网络。
+V2 保持已验证的 CLI/MCP/Admin API 产品面不变，把内部 canonical model 升级为 `Session → Episode → Evidence → Knowledge → Entity/Relation/Temporal`。SQLite 仍是唯一事实源；Memory 是 Knowledge Unit 的 public abstraction。Fresh DB 直接使用 schema v7；已有 memory.db 通过带 preflight backup、transaction、count/version/FK validation 的迁移保留全部历史。
 
-如果这个最小闭环不能让第二次任务更快、更准，那么更复杂的自动采集和 UI 不会修复产品价值；如果它成立，再按 MVP-1 到 MVP-4 逐步增加 Agent 接入、自动化、可信度和人类控制面。这样每一步都有独立结果，也都能及时停止错误方向。
+下一阶段优化应以 V2 retrieval benchmark 为依据：先继续改进 deterministic Entity extraction、Evidence quality 和 relation ranking，只有实际 recall 数据证明 FTS + Entity + Relation 不足时才增加 derived vector index。Vector、CodeGraph、LLM Entity extraction、Team/Cloud Storage 和 cross-repository entity resolution 都不能反向污染 canonical model。
 
 Rust 的定位是“被数据证明后抽取的性能内核”，不是产品控制面。这个方案参考 CodeGraph 的实践：CodeGraph 的 CLI、MCP、SQLite 编排和 npm API 使用 TypeScript/Node，只有多语言 tree-sitter 解析这一明确计算热点使用 native Rust kernel。Polarbear Memory v0.1 没有同等级解析热点，因此不预付双语言、native build 和跨平台发布成本。参考 [CodeGraph architecture](https://github.com/colbymchenry/codegraph/blob/main/README.md) 与 [CodeGraph package metadata](https://github.com/colbymchenry/codegraph/blob/main/package.json)。
+## 31. UML 与代码结构补充
+
+代码职责、最终 As-built UML、关键时序、设计模式和结构治理 Roadmap 见 [`TRD_UML_DESIGN.md`](./TRD_UML_DESIGN.md)。工程实现必须同时遵守仓库根目录 [`AGENTS.md`](../AGENTS.md)。图纸采用仓库内 Mermaid 文本，不依赖任何远程渲染服务。

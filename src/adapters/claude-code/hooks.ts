@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSyn
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod/v4";
-import { finalizeSessionEvents } from "../application/finalization.js";
-import { runMaintenance } from "../application/maintenance.js";
-import type { EventEnvelope } from "../domain/event.js";
-import { discoverGitContext } from "../platform/git.js";
-import { loadProject, readProjectPolicy, type ProjectBinding, type ProjectPolicy } from "../platform/project.js";
-import { redactText } from "../security/redaction.js";
-import { SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { finalizeSessionEvents } from "../../application/finalization.js";
+import { runMaintenance } from "../../application/maintenance.js";
+import type { EventEnvelope } from "../../domain/event.js";
+import { discoverGitContext } from "../../platform/git.js";
+import { loadProject, readProjectPolicy, type ProjectBinding, type ProjectPolicy } from "../../platform/project.js";
+import { redactText } from "../../security/redaction.js";
+import { SqliteMemoryStore } from "../../storage/sqlite-store.js";
 
 const HookInput = z.discriminatedUnion("hook_event_name", [
   z.object({
@@ -33,7 +33,7 @@ export const EventEnvelopeSchema = z.object({
   projectId: z.uuid(),
   sessionRefHash: z.string().regex(/^[a-f0-9]{64}$/u),
   agentKind: z.literal("claude-code"),
-  eventType: z.enum(["CLAUDE_STOP", "CLAUDE_SESSION_END"]),
+  eventType: z.enum(["AGENT_STOP", "AGENT_SESSION_END", "CLAUDE_STOP", "CLAUDE_SESSION_END"]),
   payload: z.record(z.string(), z.union([z.string(), z.boolean()])),
   payloadDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   occurredAt: z.iso.datetime(),
@@ -46,7 +46,7 @@ function sha256(value: string): string {
 }
 
 function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.infer<typeof HookInput>, now: Date): EventEnvelope {
-  const eventType = raw.hook_event_name === "Stop" ? "CLAUDE_STOP" : "CLAUDE_SESSION_END";
+  const eventType = raw.hook_event_name === "Stop" ? "AGENT_STOP" : "AGENT_SESSION_END";
   const payload: Record<string, string | boolean> = raw.hook_event_name === "Stop"
     ? {
         lastAssistantMessage: redactText(raw.last_assistant_message.slice(0, 32 * 1024), homedir()),
@@ -108,7 +108,7 @@ export function replaySpool(project: ProjectBinding, store: SqliteMemoryStore): 
       const envelope = EventEnvelopeSchema.parse(JSON.parse(readFileSync(path, "utf8")));
       if (envelope.projectId !== project.id) throw new Error("Spool project mismatch.");
       store.ingestRawEvent(envelope);
-      if (envelope.eventType === "CLAUDE_SESSION_END") endedSessions.add(envelope.sessionRefHash);
+      if (envelope.eventType === "AGENT_SESSION_END" || envelope.eventType === "CLAUDE_SESSION_END") endedSessions.add(envelope.sessionRefHash);
       unlinkSync(path);
       replayed += 1;
     } catch {
@@ -143,7 +143,7 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
     }
     const accepted = store.ingestRawEvent(envelope);
     let finalized = 0;
-    if (envelope.eventType === "CLAUDE_SESSION_END") {
+    if (envelope.eventType === "AGENT_SESSION_END") {
       finalized = finalizeSessionEvents(store, project.id, envelope.sessionRefHash, {
         branchName: inputGit.branch,
         commitSha: inputGit.head,
@@ -159,7 +159,7 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
         // Lifecycle maintenance must not make a SessionEnd hook blocking or fatal.
       }
     }
-    if (policy.rawEventRetentionDays > 0 || envelope.eventType === "CLAUDE_SESSION_END") {
+    if (policy.rawEventRetentionDays > 0 || envelope.eventType === "AGENT_SESSION_END") {
       store.deleteExpiredRawEvents(project.id, now.toISOString());
     }
     return { accepted, spooled: false, finalized };

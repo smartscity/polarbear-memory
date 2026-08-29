@@ -156,6 +156,23 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
       source_type TEXT NOT NULL CHECK (source_type IN ('CLI','FIXTURE')),
       commit_sha TEXT, branch_name TEXT, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     ) STRICT;
+    CREATE TABLE memory_revisions (
+      id TEXT PRIMARY KEY, memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      revision_no INTEGER NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL,
+      reason TEXT NOT NULL, actor_kind TEXT NOT NULL, created_at TEXT NOT NULL,
+      UNIQUE(memory_id, revision_no)
+    ) STRICT;
+    CREATE TABLE memory_anchors (
+      memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      repo_relative_path TEXT NOT NULL, content_digest TEXT, captured_commit TEXT,
+      PRIMARY KEY(memory_id, repo_relative_path)
+    ) STRICT;
+    CREATE TABLE memory_relations (
+      source_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      target_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+      relation_type TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+      PRIMARY KEY(source_memory_id, target_memory_id, relation_type)
+    ) STRICT;
   `);
   legacy.prepare("INSERT INTO projects VALUES (?, 'legacy', ?, ?, 1)").run(projectId, now, now);
   const summary = "Preserve this legacy decision";
@@ -166,6 +183,18 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
       source_type, content_hash, created_at, updated_at
     ) VALUES ('legacy-memory', ?, 'DECISION', ?, ?, 700, 500, 'CLI', ?, ?, ?)
   `).run(projectId, summary, summary, hash, now, now);
+  const targetSummary = "Older decision retained for relation migration";
+  const targetHash = createHash("sha256").update(`DECISION\0${targetSummary}\0${targetSummary}`).digest("hex");
+  legacy.prepare(`
+    INSERT INTO memories(
+      id, project_id, type, summary, content, confidence_milli, importance_milli,
+      source_type, content_hash, created_at, updated_at
+    ) VALUES ('legacy-target', ?, 'DECISION', ?, ?, 700, 500, 'CLI', ?, ?, ?)
+  `).run(projectId, targetSummary, targetSummary, targetHash, now, now);
+  legacy.prepare("INSERT INTO memory_revisions VALUES ('legacy-revision', 'legacy-memory', 1, ?, ?, 'recorded', 'HUMAN_CLI', ?)")
+    .run(summary, summary, now);
+  legacy.prepare("INSERT INTO memory_anchors VALUES ('legacy-memory', 'src/legacy.ts', 'digest', 'abc123')").run();
+  legacy.prepare("INSERT INTO memory_relations VALUES ('legacy-memory', 'legacy-target', 'SUPERSEDES', 'legacy relation', ?)").run(now);
   legacy.close();
 
   const migrated = new SqliteMemoryStore(path);
@@ -176,11 +205,23 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
       .some(({ memory }) => memory.id === "legacy-memory"), true);
     assert.equal(migrated.search(projectId, "Captured hook", 10)
       .some(({ memory }) => memory.sourceType === "HOOK"), true);
+    const legacyMemory = migrated.get(projectId, "legacy-memory");
+    assert.equal(legacyMemory?.fileAnchors[0]?.path, "src/legacy.ts");
+    assert.equal(legacyMemory?.relations[0]?.type, "SUPERSEDES");
+    assert.equal(legacyMemory?.evidence[0]?.role, "ORIGIN");
+    assert.equal(migrated.revisions(projectId, "legacy-memory").length, 1);
   } finally {
     migrated.close();
   }
   const migrationBackups = join(directory, "backups", "migrations");
   assert.equal(readdirSync(migrationBackups).filter((name) => name.endsWith(".db")).length, 1);
+  const verified = new DatabaseSync(path, { readOnly: true });
+  try {
+    assert.ok(verified.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'legacy_memories_v1'").get());
+    assert.equal(verified.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally {
+    verified.close();
+  }
 });
 
 test("refuses to open a database created by a newer Engine", () => {
@@ -228,7 +269,7 @@ test("edits create an auditable revision and physical purge keeps a tombstone au
       reason: "User explicitly requested permanent deletion",
       actor_kind: "HUMAN_CLI",
     });
-    assert.equal((audit.prepare("SELECT count(*) AS count FROM memory_revisions").get() as { count: number }).count, 0);
+    assert.equal((audit.prepare("SELECT count(*) AS count FROM knowledge_versions").get() as { count: number }).count, 0);
   } finally {
     audit.close();
   }

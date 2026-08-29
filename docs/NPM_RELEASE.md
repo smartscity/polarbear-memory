@@ -30,7 +30,7 @@ npx polarbear-memory --version
 - `npm run package:audit` 审计 npm 实际计算出的 tarball 文件清单，而不是只检查源码目录。
 - `npm run package:smoke` 从真实 `.tgz` 安装到临时目录，并执行版本检查和 `init --dry-run`。
 
-当前 dry-run tarball 为 27 个文件、约 212 KB。PRD、TRD、用户手册、验证方案、`.business/`、`src/`、测试、fixture、脚本和 source map 均不发布。首次正式发布仍需完成 npm 账号、2FA、包名复查和 release commit 审核。
+当前 V2 dry-run tarball 为 30 个文件、约 274 KB。PRD、TRD、用户手册、验证方案、`.business/`、`src/`、测试、fixture、脚本和 source map 均不发布。首次正式发布仍需完成 npm 账号、2FA、包名复查和 release commit 审核。
 
 Registry 对 `polarbear-memory` 当前返回 HTTP 404，包名看起来尚未占用，但这不构成预留。正式发布前必须再次检查：
 

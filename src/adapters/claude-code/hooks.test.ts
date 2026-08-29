@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, test } from "node:test";
-import { discoverGitContext } from "../platform/git.js";
-import { planProject, updateProjectPolicy, writeProjectConfig } from "../platform/project.js";
-import { SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { discoverGitContext } from "../../platform/git.js";
+import { planProject, updateProjectPolicy, writeProjectConfig } from "../../platform/project.js";
+import { SqliteMemoryStore } from "../../storage/sqlite-store.js";
 import { ingestClaudeHook, replayProjectSpool } from "./hooks.js";
 
 const temporaryDirectories: string[] = [];

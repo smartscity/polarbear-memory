@@ -274,14 +274,14 @@ test("10k unchanged Memory incremental maintenance stays bounded", () => {
   database.exec("BEGIN IMMEDIATE");
   try {
     const insert = database.prepare(`
-      INSERT INTO memories(
-        id, project_id, type, summary, content, confidence_milli, importance_milli,
-        relevance_milli, source_type, content_hash, created_at, updated_at, last_checked_commit
-      ) VALUES (?, ?, 'DECISION', ?, ?, 700, 500, 600, 'FIXTURE', ?, ?, ?, ?)
+      INSERT INTO knowledge_units(
+        id, workspace_id, project_id, kind, summary, body, confidence_milli, importance_milli,
+        relevance_milli, current_content_hash, created_at, updated_at, valid_from, last_checked_commit
+      ) VALUES (?, 'local', ?, 'DECISION', ?, ?, 700, 500, 600, ?, ?, ?, ?, ?)
     `);
     for (let index = 0; index < 10_000; index += 1) {
       const summary = `Bulk unchanged decision ${index}`;
-      insert.run(`bulk-${index}`, projectId, summary, summary, `hash-${index}`, now, now, head);
+      insert.run(`bulk-${index}`, projectId, summary, summary, `hash-${index}`, now, now, now, head);
     }
     database.prepare("INSERT INTO maintenance_cursors(project_id, checked_commit, updated_at) VALUES (?, ?, ?)")
       .run(projectId, head, now);

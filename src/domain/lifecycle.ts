@@ -3,12 +3,17 @@ export const ASSESSOR_VERSION = "mvp3-v1";
 
 export type CorrectnessRisk = "LOW" | "MEDIUM" | "HIGH";
 export type CompletionState = "OPEN" | "COMPLETED" | "CANCELLED";
-export type MemoryRelationType = "SUPERSEDES" | "CONTRADICTS";
+export type MemoryRelationType = "SUPERSEDES" | "CONTRADICTS" | "EXTENDS" | "DERIVES" | "DEPENDS_ON" | "RELATED_TO";
 
 export interface FileAnchor {
   path: string;
+  entityId?: string;
+  symbol?: string;
+  startLine?: number;
+  endLine?: number;
   contentDigest?: string;
   capturedCommit?: string;
+  lastCheckedCommit?: string;
 }
 
 export interface MemoryRelation {

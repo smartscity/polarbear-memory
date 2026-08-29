@@ -8,6 +8,7 @@ import { MVP_MEMORY_TYPES } from "../domain/memory.js";
 import { discoverGitContext, normalizeRepoFile } from "../platform/git.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 import type { ProjectBinding } from "../platform/project.js";
+import { VERSION } from "../version.js";
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
@@ -35,7 +36,7 @@ export interface MemoryMcpOptions {
 
 export function createMemoryMcpServer(options: MemoryMcpOptions): McpServer {
   const { store, project } = options;
-  const server = new McpServer({ name: "polarbear-memory", version: "0.0.4" });
+  const server = new McpServer({ name: "polarbear-memory", version: VERSION });
 
   server.registerTool("memory_context", {
     title: "Get relevant project memory",
@@ -79,7 +80,7 @@ export function createMemoryMcpServer(options: MemoryMcpOptions): McpServer {
 
   server.registerTool("memory_search", {
     title: "Search project memory",
-    description: "Search local project memory for decisions, pitfalls, task state or TODOs.",
+    description: "Search local project knowledge using text, engineering entities, relations, lifecycle and valid time.",
     inputSchema: z.object({
       query: z.string().min(1).max(4_096),
       limit: z.number().int().min(1).max(50).default(10),
@@ -99,7 +100,21 @@ export function createMemoryMcpServer(options: MemoryMcpOptions): McpServer {
         latestAssessment: memory.latestAssessment,
         confidence: memory.confidence,
         importance: memory.importance,
+        validFrom: memory.validFrom,
+        validTo: memory.validTo,
         files: memory.files,
+        entities: memory.entities.map((link) => ({
+          role: link.role,
+          kind: link.entity.kind,
+          canonicalKey: link.entity.canonicalKey,
+          displayName: link.entity.displayName,
+        })),
+        evidence: memory.evidence.slice(0, 5).map((link) => ({
+          role: link.role,
+          type: link.evidence.type,
+          sourceRef: link.evidence.sourceRef,
+          trustLevel: link.evidence.trustLevel,
+        })),
       })));
     } catch (error) {
       return safeError(error);
@@ -108,7 +123,7 @@ export function createMemoryMcpServer(options: MemoryMcpOptions): McpServer {
 
   server.registerTool("memory_record", {
     title: "Record reusable project memory",
-    description: "Record a durable decision, pitfall, current task state or TODO. Never store full transcripts, secrets or conversational filler.",
+    description: "Record reusable project knowledge. Never store full transcripts, secrets or conversational filler.",
     inputSchema: z.object({
       type: z.enum(MVP_MEMORY_TYPES),
       summary: z.string().min(1).max(2_048),

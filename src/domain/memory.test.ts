@@ -4,7 +4,9 @@ import { parseMemoryType, validateRecordInput } from "./memory.js";
 
 test("parses MVP memory types case-insensitively", () => {
   assert.equal(parseMemoryType("pitfall"), "PITFALL");
-  assert.throws(() => parseMemoryType("FACT"), /Unsupported memory type/);
+  assert.equal(parseMemoryType("fact"), "FACT");
+  assert.equal(parseMemoryType("architecture"), "ARCHITECTURE");
+  assert.throws(() => parseMemoryType("TRANSCRIPT"), /Unsupported memory type/);
 });
 
 test("enforces content and score limits", () => {

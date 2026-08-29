@@ -1,13 +1,10 @@
 import type { CompletionState, CorrectnessRisk, FileAnchor, LifecycleAssessment, MemoryRelation, UsageStats } from "./lifecycle.js";
+import type { EntityKind, EntityRole, KnowledgeEntityLink, KnowledgeEvidenceLink, KnowledgeKind } from "./knowledge.js";
+import { KNOWLEDGE_KINDS } from "./knowledge.js";
 
-export const MVP_MEMORY_TYPES = [
-  "DECISION",
-  "PITFALL",
-  "TASK_STATE",
-  "TODO",
-] as const;
+export const MVP_MEMORY_TYPES = KNOWLEDGE_KINDS;
 
-export type MemoryType = (typeof MVP_MEMORY_TYPES)[number];
+export type MemoryType = KnowledgeKind;
 export type LifecycleStatus = "ACTIVE" | "ARCHIVED" | "SUPERSEDED" | "REJECTED";
 export type VerificationState = "UNVERIFIED" | "VERIFIED" | "DISPUTED";
 
@@ -39,6 +36,10 @@ export interface Memory {
   restoreProtectedUntil?: string;
   createdAt: string;
   updatedAt: string;
+  validFrom?: string;
+  validTo?: string;
+  evidence: KnowledgeEvidenceLink[];
+  entities: KnowledgeEntityLink[];
 }
 
 export interface RecordMemoryInput {
@@ -53,6 +54,18 @@ export interface RecordMemoryInput {
   importance?: number;
   commitSha?: string;
   branchName?: string;
+  validFrom?: string;
+  validTo?: string;
+  episodeId?: string;
+  evidenceIds?: string[];
+  entities?: Array<{
+    kind: EntityKind;
+    canonicalKey: string;
+    displayName: string;
+    role?: EntityRole;
+    confidence?: number;
+    metadata?: Record<string, string | number | boolean | null>;
+  }>;
 }
 
 export interface MemorySearchResult {
@@ -82,5 +95,8 @@ export function validateRecordInput(input: RecordMemoryInput): void {
   if (input.completionState && input.completionState !== "OPEN"
     && input.type !== "TASK_STATE" && input.type !== "TODO") {
     throw new Error("Only TASK_STATE and TODO can be recorded as completed or cancelled.");
+  }
+  if (input.validFrom && input.validTo && input.validTo < input.validFrom) {
+    throw new Error("validTo must not be earlier than validFrom.");
   }
 }
