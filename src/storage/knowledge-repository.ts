@@ -80,7 +80,7 @@ export class KnowledgeRepository {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(evidenceId, projectId, episodeId, evidenceType,
       input.commitSha ? `git:${input.commitSha}` : sourceType,
-      createHash("sha256").update(`${body}\0${input.commitSha ?? ""}`).digest("hex"), now,
+      createHash("sha256").update(`${contentHash}\0${input.commitSha ?? ""}`).digest("hex"), now,
       input.commitSha ?? null, sourceType === "CLI" ? "HIGH" : sourceType === "FIXTURE" ? "LOW" : "MEDIUM",
       JSON.stringify({ sourceType, ...(input.branchName ? { branchName: input.branchName } : {}) }), now);
     this.#database.prepare(`

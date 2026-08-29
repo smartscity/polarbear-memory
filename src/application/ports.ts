@@ -16,6 +16,7 @@ import type {
   Session,
   TrustLevel,
 } from "../domain/knowledge.js";
+import type { ContextOsPort } from "../domain/context-os.js";
 
 export interface TokenSavingsStats {
   contextPackCount: number;
@@ -93,6 +94,7 @@ export interface MemoryStore {
   ): void;
   tokenSavings(projectId: string): TokenSavingsStats;
   resetTokenSavings(projectId: string, now: string): TokenSavingsStats;
+  contextOs(): ContextOsPort;
   noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory;
   maintenanceCursor(projectId: string): string | undefined;
   maintenanceCandidates(projectId: string, limit: number, targetCommit?: string, archiveBefore?: string, now?: string, changedPaths?: string[]): Memory[];

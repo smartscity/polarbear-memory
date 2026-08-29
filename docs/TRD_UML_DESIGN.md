@@ -156,7 +156,7 @@ flowchart LR
   Agents["Claude Code / Codex / Cursor / other clients"] --> MCP["Model-independent MCP Server"]
   Desktop["Polarbear Desktop"] --> Socket["Local socket transport"]
   Socket --> AdminRouter["Admin Router"]
-  AdminRouter --> AdminCommands["Admin API 1.2 commands\nV2 create · lifecycle · feedback · savings"]
+  AdminRouter --> AdminCommands["Admin API 1.4 commands\nV2 lifecycle · Context OS task history · run Context · activity"]
 
   MemoryCommands --> Facade["SqliteMemoryStore Facade"]
   EventEnvelope --> Facade
@@ -311,3 +311,6 @@ sequenceDiagram
 - 运行时事务模板和生命周期 INSERT 各只有一个实现。
 - FTS 删除后可以完全 rebuild；迁移失败可恢复。
 - README、用户手册、TRD、本文和真实 CLI/MCP 行为一致。
+# Context OS UML addendum
+
+The current schema v8 design, provider-neutral runtime architecture, Context Packet planner, lifecycle sequence, migration boundary, and implementation roadmap are defined in [CONTEXT_OS_DESIGN.md](./CONTEXT_OS_DESIGN.md). That document is the normative UML supplement for the Agent Context OS upgrade. The existing diagrams below remain the Option B Memory-plane baseline.

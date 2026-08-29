@@ -38,7 +38,7 @@ test("Claude integration dry-run is non-mutating and install preserves other MCP
     const config = JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
     assert.ok(config.mcpServers.existing);
     assert.ok(config.mcpServers["polarbear-memory"]);
-    assert.match(readFileSync(join(project.root, ".claude", "rules", "polarbear-memory.md"), "utf8"), /memory_context/);
+    assert.match(readFileSync(join(project.root, ".claude", "rules", "polarbear-memory.md"), "utf8"), /context_get/);
     const settings = JSON.parse(readFileSync(join(project.root, ".claude", "settings.json"), "utf8")) as {
       hooks: { Stop: unknown[]; SessionEnd: unknown[] };
     };
@@ -79,7 +79,7 @@ test("Claude uninstall is previewable and removes only managed entries", () => {
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 
     const preview = uninstallClaudeIntegration(project, { dryRun: true });
-    assert.deepEqual(preview.plan, { mcpEntry: true, hooks: 2, managedRule: true, modifiedRulePreserved: false });
+    assert.deepEqual(preview.plan, { mcpEntry: true, hooks: 8, managedRule: true, modifiedRulePreserved: false });
     assert.ok((JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["polarbear-memory"]);
 
     const result = uninstallClaudeIntegration(project, { dryRun: false });

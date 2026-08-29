@@ -1,5 +1,6 @@
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 export const V2_MIGRATION_CHECKSUM = "v2-fact-episode-entity-2026-08-28";
+export const CONTEXT_OS_MIGRATION_CHECKSUM = "v8-agent-context-os-2026-08-29";
 
 export const V2_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -301,6 +302,178 @@ CREATE TABLE IF NOT EXISTS purge_audit (
   created_at TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title TEXT NOT NULL CHECK (length(title) > 0),
+  objective TEXT NOT NULL CHECK (length(objective) > 0),
+  status TEXT NOT NULL CHECK (status IN ('PLANNED','ACTIVE','BLOCKED','VERIFYING','DONE','CANCELLED')),
+  phase TEXT NOT NULL CHECK (phase IN ('DISCOVERY','DESIGN','IMPLEMENTATION','DEBUGGING','VERIFICATION','REVIEW','DOCUMENTATION')),
+  priority_milli INTEGER NOT NULL DEFAULT 500 CHECK (priority_milli BETWEEN 0 AND 1000),
+  parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  last_checkpoint_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS tasks_project_state ON tasks(project_id, status, priority_milli DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  integration_mode TEXT NOT NULL CHECK (integration_mode IN ('ASSISTED','MANAGED')),
+  external_session_ref_hash TEXT,
+  status TEXT NOT NULL CHECK (status IN ('OPEN','ENDED','FAILED')),
+  estimated_context_tokens INTEGER NOT NULL DEFAULT 0 CHECK (estimated_context_tokens >= 0),
+  turn_count INTEGER NOT NULL DEFAULT 0 CHECK (turn_count >= 0),
+  compact_count INTEGER NOT NULL DEFAULT 0 CHECK (compact_count >= 0),
+  task_affinity_milli INTEGER NOT NULL DEFAULT 1000 CHECK (task_affinity_milli BETWEEN 0 AND 1000),
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, provider, external_session_ref_hash)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS agent_sessions_project ON agent_sessions(project_id, provider, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS execution_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  agent_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('PLANNED','RUNNING','SUCCEEDED','FAILED','CANCELLED')),
+  phase TEXT NOT NULL CHECK (phase IN ('DISCOVERY','DESIGN','IMPLEMENTATION','DEBUGGING','VERIFICATION','REVIEW','DOCUMENTATION')),
+  context_packet_id TEXT,
+  checkpoint_id TEXT,
+  rotation_reason TEXT,
+  model TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  ended_at TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS execution_runs_task ON execution_runs(project_id, task_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS execution_runs_session ON execution_runs(agent_session_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS observations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  execution_run_id TEXT REFERENCES execution_runs(id) ON DELETE SET NULL,
+  agent_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_redacted_json TEXT NOT NULL,
+  artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+  estimated_tokens INTEGER NOT NULL DEFAULT 0 CHECK (estimated_tokens >= 0),
+  importance_milli INTEGER NOT NULL DEFAULT 500 CHECK (importance_milli BETWEEN 0 AND 1000),
+  source_fingerprint TEXT NOT NULL,
+  persisted_as_memory INTEGER NOT NULL DEFAULT 0 CHECK (persisted_as_memory IN (0,1)),
+  occurred_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, source_fingerprint)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS observations_pending ON observations(project_id, persisted_as_memory, importance_milli DESC, occurred_at);
+CREATE INDEX IF NOT EXISTS observations_task ON observations(task_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  execution_run_id TEXT REFERENCES execution_runs(id) ON DELETE SET NULL,
+  previous_checkpoint_id TEXT REFERENCES checkpoints(id) ON DELETE SET NULL,
+  status TEXT NOT NULL CHECK (status IN ('PLANNED','ACTIVE','BLOCKED','VERIFYING','DONE','CANCELLED')),
+  phase TEXT NOT NULL CHECK (phase IN ('DISCOVERY','DESIGN','IMPLEMENTATION','DEBUGGING','VERIFICATION','REVIEW','DOCUMENTATION')),
+  summary TEXT NOT NULL CHECK (length(summary) > 0),
+  state_json TEXT NOT NULL,
+  delta_json TEXT NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  source_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(task_id, source_fingerprint)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS checkpoints_task ON checkpoints(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS retrieval_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  query TEXT NOT NULL,
+  strategy_version TEXT NOT NULL,
+  candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+  selected_count INTEGER NOT NULL CHECK (selected_count >= 0),
+  candidate_tokens INTEGER NOT NULL CHECK (candidate_tokens >= 0),
+  selected_tokens INTEGER NOT NULL CHECK (selected_tokens >= 0),
+  latency_ms INTEGER NOT NULL DEFAULT 0 CHECK (latency_ms >= 0),
+  budget_json TEXT NOT NULL,
+  exclusions_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS retrieval_runs_task ON retrieval_runs(project_id, task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS context_packets (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  execution_run_id TEXT REFERENCES execution_runs(id) ON DELETE SET NULL,
+  retrieval_run_id TEXT NOT NULL REFERENCES retrieval_runs(id) ON DELETE RESTRICT,
+  version INTEGER NOT NULL CHECK (version > 0),
+  current_request TEXT NOT NULL,
+  provider TEXT,
+  max_tokens INTEGER NOT NULL CHECK (max_tokens > 0),
+  estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+  packet_hash TEXT NOT NULL,
+  rendered_text TEXT NOT NULL,
+  structured_payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, packet_hash)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS context_packets_task ON context_packets(project_id, task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS context_packet_items (
+  packet_id TEXT NOT NULL REFERENCES context_packets(id) ON DELETE CASCADE,
+  rank INTEGER NOT NULL CHECK (rank > 0),
+  source_type TEXT NOT NULL CHECK (source_type IN ('TASK','CHECKPOINT','MEMORY')),
+  source_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+  score_milli INTEGER NOT NULL,
+  estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+  reason TEXT NOT NULL,
+  content TEXT NOT NULL,
+  truncated INTEGER NOT NULL DEFAULT 0 CHECK (truncated IN (0,1)),
+  PRIMARY KEY(packet_id, rank)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS context_packet_items_source ON context_packet_items(source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS usage_ledger (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  execution_run_id TEXT REFERENCES execution_runs(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cached_input_tokens >= 0),
+  output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+  context_packet_tokens INTEGER NOT NULL DEFAULT 0 CHECK (context_packet_tokens >= 0),
+  useful_context_tokens INTEGER NOT NULL DEFAULT 0 CHECK (useful_context_tokens >= 0),
+  successful INTEGER NOT NULL DEFAULT 0 CHECK (successful IN (0,1)),
+  created_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS usage_ledger_project ON usage_ledger(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS usage_ledger_task ON usage_ledger(task_id, created_at DESC);
+
 CREATE VIEW IF NOT EXISTS memory_projection AS
 SELECT
   k.row_id,
@@ -309,6 +482,8 @@ SELECT
   k.kind AS type,
   k.summary,
   k.body AS content,
+  k.scope_kind,
+  k.scope_ref,
   k.lifecycle_status,
   k.verification_state,
   k.correctness_risk,

@@ -114,7 +114,7 @@ test("rejects incompatible API major versions without leaking local paths", asyn
   const token = readFileSync(handle.paths.token, "utf8").trim();
   const response = await request(handle, { id: "6", apiVersion: "2.0", token, method: "projects.status", params: { projectRoot: fixture.root } });
   assert.equal(response.ok, false);
-  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: "Memory Admin API 1.2 is required." });
+  assert.deepEqual(response.error, { code: "INCOMPATIBLE_API", message: `Memory Admin API ${ADMIN_API_VERSION} is required.` });
   assert.doesNotMatch(JSON.stringify(response), new RegExp(fixture.root.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });
 
@@ -194,6 +194,107 @@ test("manages V2 records, task completion, feedback and resettable token savings
     params: { projectRoot: fixture.root, confirmation: "RESET" },
   });
   assert.equal((reset.result as { resetCount: number }).resetCount, 1);
+});
+
+test("Admin API 1.4 manages durable tasks, checkpoints and explainable Context Packets", async () => {
+  const fixture = repository();
+  const handle = await startAdminApi(fixture.dataRoot);
+  handles.push(handle);
+  const token = readFileSync(handle.paths.token, "utf8").trim();
+  const created = await request(handle, {
+    id: "context-os-1", apiVersion: ADMIN_API_VERSION, token, method: "tasks.create",
+    params: { projectRoot: fixture.root, title: "Settlement retry", objective: "Implement bounded retry", phase: "IMPLEMENTATION" },
+  });
+  const task = created.result as { id: string };
+  assert.ok(task.id);
+  const checkpoint = await request(handle, {
+    id: "context-os-2", apiVersion: ADMIN_API_VERSION, token, method: "tasks.checkpoint",
+    params: {
+      projectRoot: fixture.root, taskId: task.id, status: "ACTIVE", phase: "IMPLEMENTATION", summary: "Retry is implemented.",
+      state: { changed: ["Added retry."], remaining: ["Verify integration."] },
+    },
+  });
+  assert.ok((checkpoint.result as { id: string }).id);
+  const built = await request(handle, {
+    id: "context-os-3", apiVersion: ADMIN_API_VERSION, token, method: "contexts.build",
+    params: { projectRoot: fixture.root, taskId: task.id, currentRequest: "Continue verification", maxTokens: 600 },
+  });
+  const packet = built.result as { id: string; estimatedTokens: number; maxTokens: number };
+  assert.ok(packet.estimatedTokens <= packet.maxTokens);
+  const explained = await request(handle, {
+    id: "context-os-4", apiVersion: ADMIN_API_VERSION, token, method: "contexts.packet_explain",
+    params: { projectRoot: fixture.root, packetId: packet.id },
+  });
+  assert.ok((explained.result as { budgetByCategory: object }).budgetByCategory);
+});
+
+test("exposes task-local checkpoint and run history without exposing storage", async () => {
+  const fixture = repository();
+  const handle = await startAdminApi(fixture.dataRoot);
+  handles.push(handle);
+  const token = readFileSync(handle.paths.token, "utf8").trim();
+  const created = await request(handle, {
+    id: "history-1", apiVersion: ADMIN_API_VERSION, token, method: "tasks.create",
+    params: { projectRoot: fixture.root, title: "Desktop history", objective: "Inspect durable run state." },
+  });
+  const taskId = (created.result as { id: string }).id;
+  await request(handle, {
+    id: "history-2", apiVersion: ADMIN_API_VERSION, token, method: "tasks.checkpoint",
+    params: { projectRoot: fixture.root, taskId, status: "ACTIVE", phase: "IMPLEMENTATION", summary: "First durable checkpoint." },
+  });
+  const checkpoints = await request(handle, {
+    id: "history-3", apiVersion: ADMIN_API_VERSION, token, method: "tasks.checkpoints",
+    params: { projectRoot: fixture.root, taskId },
+  });
+  assert.equal((checkpoints.result as { items: unknown[] }).items.length, 1);
+
+  const project = planProject(discoverGitContext(fixture.root));
+  const store = new SqliteMemoryStore(project.databasePath);
+  let runId = "";
+  let packetId = "";
+  try {
+    store.initializeProject(project);
+    const packet = store.contextOs().buildContext(project.id, {
+      taskId,
+      currentRequest: "Inspect the durable run Context.",
+      maxTokens: 600,
+    });
+    packetId = packet.id;
+    const run = store.contextOs().startExecution(project.id, {
+      taskId,
+      provider: "codex",
+      phase: "IMPLEMENTATION",
+      integrationMode: "MANAGED",
+      contextPacketId: packet.id,
+    });
+    runId = run.id;
+    store.contextOs().finishExecution(project.id, runId, { status: "SUCCEEDED" });
+  } finally {
+    store.close();
+  }
+  const runs = await request(handle, {
+    id: "history-4", apiVersion: ADMIN_API_VERSION, token, method: "tasks.runs",
+    params: { projectRoot: fixture.root, taskId },
+  });
+  assert.equal((runs.result as { items: Array<{ id: string }> }).items[0]?.id, runId);
+  const runContext = await request(handle, {
+    id: "history-5", apiVersion: ADMIN_API_VERSION, token, method: "tasks.run_context",
+    params: { projectRoot: fixture.root, taskId, runId },
+  });
+  assert.equal((runContext.result as { run: { id: string } }).run.id, runId);
+  assert.equal((runContext.result as { packet?: { id: string } }).packet?.id, packetId);
+  const connections = await request(handle, {
+    id: "history-6", apiVersion: ADMIN_API_VERSION, token, method: "agents.connections",
+    params: { projectRoot: fixture.root },
+  });
+  const connection = (connections.result as { items: Array<{
+    provider: string; integrationMode: string; status: string; lastSeenAt: string; activeRunCount: number;
+  }> }).items[0];
+  assert.equal(connection?.provider, "codex");
+  assert.equal(connection?.integrationMode, "MANAGED");
+  assert.equal(connection?.status, "IDLE");
+  assert.equal(connection?.activeRunCount, 0);
+  assert.ok(connection?.lastSeenAt);
 });
 
 test("exposes revision history, explainable maintenance, diagnostics and safe backup operations", async () => {

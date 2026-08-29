@@ -1,5 +1,18 @@
 # Polarbear Memory
 
+Polarbear is a local-first Agent Context Operating System. It externalizes durable task state from disposable Codex and Claude Code sessions, builds immutable task-relevant Context Packets under a token budget, and checkpoints execution across providers.
+
+The existing Fact + Episode + Entity memory model remains the durable knowledge plane. Schema v8 adds first-class Tasks, Checkpoints, Execution Runs, Observations, Retrieval Runs, Context Packets, and per-run usage metrics without breaking existing Memory tools.
+
+```bash
+npm install --global polarbear-memory
+cd /path/to/git/repository
+polarbear-memory init
+polarbear-memory task create --title "Implement retry" --objective "Implement and verify bounded retry"
+```
+
+See the [Context OS user guide](docs/CONTEXT_OS_USER_GUIDE.md) for MCP, checkpoint, assisted, managed, Codex, Claude Code, Desktop, and metrics workflows. See the [Context OS design](docs/CONTEXT_OS_DESIGN.md) for the architecture, UML, schema v8 migration, security model, dependencies, and roadmap.
+
 Polarbear Memory 是面向 AI 编程 Agent 的本地长期记忆引擎。
 
 它把项目中值得复用的决策、失败经验、任务进度和下一步保存在本地；当你开始新 session 或切换任务时，Agent 只取回当前任务需要的短 Context Pack，而不是重新扫描全部历史或把所有记忆塞进 prompt。
@@ -93,7 +106,7 @@ polarbear-memory claude install
 
 - `.mcp.json`：注册 Polarbear Memory MCP stdio server。
 - `.claude/rules/polarbear-memory.md`：告诉 Agent 何时读取、记录和验证 Memory。
-- `.claude/settings.json`：安装 `Stop` 与 `SessionEnd` 本地 handoff hooks。
+- `.claude/settings.json`: installs local SessionStart, prompt, tool, compaction, Stop, and SessionEnd observation hooks.
 
 已有文件会先备份。安装后重新启动 Claude Code，并在首次提示时批准项目 MCP server。
 
@@ -274,7 +287,7 @@ polarbear-memory savings reset --confirm RESET
 
 ### Full management in Polarbear Desktop
 
-Open an initialized Git workspace and select **Memory** in the sidebar. Desktop manages the Engine through the local Admin API 1.2. It can create and filter all nine V2 Knowledge types, inspect evidence, entities, file anchors, and temporal validity, manage every relation type, complete or cancel tasks, submit usefulness feedback, and inspect or reset token-savings counters. Desktop never opens `memory.db`; validation, transactions, maintenance, backup, and audit remain Engine responsibilities.
+Open an initialized Git workspace and select **Memory** in the sidebar. Desktop manages the Engine through local Admin API 1.3. It can manage all Memory V2 knowledge and lifecycle operations plus durable Tasks, Checkpoints, Context Packets, packet explanations, observation distillation, token savings, and Context OS metrics. Desktop never opens `memory.db`; validation, transactions, migration, maintenance, backup, and audit remain Engine responsibilities.
 
 ### 生命周期维护
 

@@ -38,6 +38,8 @@ export interface Memory {
   updatedAt: string;
   validFrom?: string;
   validTo?: string;
+  scopeKind?: string;
+  scopeRef?: string;
   evidence: KnowledgeEvidenceLink[];
   entities: KnowledgeEntityLink[];
 }
@@ -56,6 +58,8 @@ export interface RecordMemoryInput {
   branchName?: string;
   validFrom?: string;
   validTo?: string;
+  scopeKind?: string;
+  scopeRef?: string;
   episodeId?: string;
   evidenceIds?: string[];
   entities?: Array<{

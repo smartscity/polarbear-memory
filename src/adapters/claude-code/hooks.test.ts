@@ -201,3 +201,43 @@ test("zero-day retention keeps Stop until SessionEnd finalization and then remov
     restoreEnvironment();
   }
 });
+
+test("SessionStart loads durable task context and PreCompact persists a checkpoint boundary", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  const previousTaskId = process.env.POLARBEAR_TASK_ID;
+  try {
+    const store = new SqliteMemoryStore(project.databasePath);
+    store.initializeProject(project);
+    const task = store.contextOs().createTask(project.id, {
+      title: "Claude lifecycle", objective: "Continue from durable Claude task context.", phase: "IMPLEMENTATION",
+    });
+    store.record(project.id, {
+      type: "CONSTRAINT", summary: "Never bypass the Memory Engine API", scopeKind: "TASK", scopeRef: task.id,
+    });
+    store.close();
+    process.env.POLARBEAR_TASK_ID = task.id;
+
+    const started = ingestClaudeHook({
+      session_id: "context-session", cwd: root, hook_event_name: "SessionStart", source: "startup",
+    }, root);
+    assert.match(started.additionalContext ?? "", /Continue from durable Claude task context/u);
+    assert.match(started.additionalContext ?? "", /Never bypass the Memory Engine API/u);
+
+    ingestClaudeHook({
+      session_id: "context-session", cwd: root, hook_event_name: "PreCompact", source: "auto",
+    }, root);
+    const verified = new SqliteMemoryStore(project.databasePath);
+    try {
+      const checkpoint = verified.contextOs().latestCheckpoint(project.id, task.id);
+      assert.ok(checkpoint);
+      assert.match(checkpoint.summary, /compaction boundary/u);
+      assert.deepEqual(checkpoint.state.remaining, [task.objective]);
+    } finally {
+      verified.close();
+    }
+  } finally {
+    if (previousTaskId === undefined) delete process.env.POLARBEAR_TASK_ID;
+    else process.env.POLARBEAR_TASK_ID = previousTaskId;
+    restoreEnvironment();
+  }
+});

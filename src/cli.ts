@@ -20,6 +20,9 @@ import { defaultDataRoot, loadProject, planProject, writeProjectConfig } from ".
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "./storage/sqlite-store.js";
 import { inspectBackup, listBackups, restoreBackup } from "./application/recovery.js";
 import { VERSION } from "./version.js";
+import {
+  checkpointCommand, contextOsCommand, managedRunCommand, metricsCommand, taskCommand,
+} from "./cli/context-os-commands.js";
 
 function usage(): string {
   return `Polarbear Memory ${VERSION}
@@ -30,6 +33,13 @@ Usage:
   polarbear-memory search QUERY [--limit N]
   polarbear-memory get MEMORY_ID
   polarbear-memory context --task TEXT [--budget N]
+  polarbear-memory task create --title TEXT --objective TEXT [--phase PHASE]
+  polarbear-memory task status [TASK_ID]
+  polarbear-memory context build --request TEXT [--task TASK_ID] [--budget N] [--provider NAME]
+  polarbear-memory context explain PACKET_ID
+  polarbear-memory checkpoint --task TASK_ID --summary TEXT [--state FILE.json]
+  polarbear-memory metrics [--task TASK_ID]
+  polarbear-memory run --provider codex|claude-code --task TASK_ID [--model MODEL] [--resume SESSION_ID|--fresh] [--writable] "REQUEST"
   polarbear-memory verify MEMORY_ID --result STATE --reason TEXT
   polarbear-memory forget MEMORY_ID --reason TEXT
   polarbear-memory restore MEMORY_ID --reason TEXT
@@ -44,7 +54,7 @@ Usage:
   polarbear-memory service run
   polarbear-memory claude install [--dry-run] [--command EXECUTABLE]
   polarbear-memory claude restore
-  polarbear-memory hook ingest --event Stop|SessionEnd
+  polarbear-memory hook ingest --event SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd
   polarbear-memory spool replay
   polarbear-memory rebuild-index
   polarbear-memory backup [create|list|verify FILE|restore FILE --confirm FILE]
@@ -219,7 +229,11 @@ async function main(): Promise<void> {
     case "record": return record(cwd, args);
     case "search": return search(cwd, args);
     case "get": return get(cwd, args);
-    case "context": return context(cwd, args);
+    case "context": return args[0] === "build" || args[0] === "explain" ? contextOsCommand(cwd, args) : context(cwd, args);
+    case "task": return taskCommand(cwd, args);
+    case "checkpoint": return checkpointCommand(cwd, args);
+    case "metrics": return metricsCommand(cwd, args);
+    case "run": return managedRunCommand(cwd, args);
     case "verify": return verify(cwd, args);
     case "forget": return forget(cwd, args);
     case "restore": return restore(cwd, args);

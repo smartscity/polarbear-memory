@@ -36,7 +36,7 @@ export class RawEventService {
         type: isSessionEndEvent(event.eventType) ? "AGENT_SESSION_END" : "TOOL_RESULT",
         occurredAt: event.occurredAt,
         sourceDigest: createHash("sha256").update(`${event.eventType}\0${event.payloadDigest}`).digest("hex"),
-        summary: isSessionEndEvent(event.eventType) ? "Agent session ended" : "Agent stop summary observed",
+        summary: isSessionEndEvent(event.eventType) ? "Agent session ended" : `Agent event observed: ${event.eventType}`,
         retentionClass: "SHORT",
       });
       if (isSessionEndEvent(event.eventType)) {

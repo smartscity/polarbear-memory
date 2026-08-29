@@ -1,0 +1,109 @@
+{
+  "kind": "context-os-suite",
+  "name": "Context OS deterministic A/B/C comparison",
+  "scenarios": [
+    {
+      "id": "continuation-after-implementation",
+      "title": "Continue storage migration",
+      "objective": "Finish the additive storage migration without replacing schema v7",
+      "request": "Continue the additive storage migration",
+      "budget": 900,
+      "rawHistoryTokens": 18000,
+      "memories": [
+        { "type": "CONSTRAINT", "summary": "Schema v7 remains the storage baseline", "content": "Only additive migrations are allowed." }
+      ],
+      "checkpoint": { "summary": "Migration repository is implemented", "remaining": ["Wire migration validation"] },
+      "expected": ["Schema v7 remains the storage baseline", "Wire migration validation"]
+    },
+    {
+      "id": "resume-failed-debugging",
+      "title": "Resume database debugging",
+      "objective": "Resolve the SQLite migration lock failure",
+      "request": "Resume the SQLite migration lock investigation",
+      "budget": 900,
+      "rawHistoryTokens": 24000,
+      "memories": [
+        { "type": "PITFALL", "summary": "Nested migration transaction causes the lock", "content": "Do not begin a second immediate transaction." }
+      ],
+      "checkpoint": { "summary": "Lock reproduced", "learned": ["The nested transaction is the failed approach"] },
+      "expected": ["Nested migration transaction causes the lock", "Lock reproduced"]
+    },
+    {
+      "id": "implementation-to-review",
+      "title": "Review Context Planner",
+      "objective": "Review the completed Context Planner implementation",
+      "request": "Review Context Planner for budget safety",
+      "budget": 900,
+      "rawHistoryTokens": 16000,
+      "memories": [
+        { "type": "DECISION", "summary": "Context packets use immutable hashes", "content": "The review must verify deterministic packet hashes." }
+      ],
+      "checkpoint": { "summary": "Planner implementation complete", "remaining": ["Perform independent review"] },
+      "expected": ["Context packets use immutable hashes", "Perform independent review"]
+    },
+    {
+      "id": "claude-to-codex",
+      "title": "Cross-provider review",
+      "objective": "Continue a Claude implementation in Codex",
+      "request": "Codex should continue the provider-neutral runtime work",
+      "budget": 900,
+      "rawHistoryTokens": 20000,
+      "memories": [
+        { "type": "ARCHITECTURE", "summary": "Runtime core is provider neutral", "content": "Provider details remain under adapters." }
+      ],
+      "expected": ["Runtime core is provider neutral"]
+    },
+    {
+      "id": "codex-to-claude",
+      "title": "Cross-provider implementation",
+      "objective": "Continue a Codex design in Claude Code",
+      "request": "Claude Code should implement the shared runtime contract",
+      "budget": 900,
+      "rawHistoryTokens": 20000,
+      "memories": [
+        { "type": "CONSTRAINT", "summary": "Provider session IDs are opaque", "content": "Persist only a hash in durable mappings." }
+      ],
+      "expected": ["Provider session IDs are opaque"]
+    },
+    {
+      "id": "return-after-unrelated-work",
+      "title": "Return to lifecycle work",
+      "objective": "Resume the memory lifecycle feature after unrelated work",
+      "request": "Resume memory lifecycle retirement logic",
+      "budget": 900,
+      "rawHistoryTokens": 28000,
+      "memories": [
+        { "type": "TASK_STATE", "summary": "Lifecycle scoring is complete", "content": "Only archive-policy wiring remains." }
+      ],
+      "checkpoint": { "summary": "Lifecycle task paused", "remaining": ["Wire archive-policy evaluation"] },
+      "expected": ["Lifecycle scoring is complete", "Wire archive-policy evaluation"]
+    },
+    {
+      "id": "conflicting-decision",
+      "title": "Resolve transport decision",
+      "objective": "Use the current local transport decision",
+      "request": "Apply the local user socket transport decision",
+      "budget": 900,
+      "rawHistoryTokens": 14000,
+      "memories": [
+        { "type": "DECISION", "summary": "Desktop uses the local Admin API", "content": "Desktop never reads memory.db directly." }
+      ],
+      "expected": ["Desktop uses the local Admin API"]
+    },
+    {
+      "id": "budget-pressure",
+      "title": "Preserve hard constraints",
+      "objective": "Build a small packet under heavy budget pressure",
+      "request": "Build a bounded packet while preserving the license constraint",
+      "budget": 400,
+      "rawHistoryTokens": 32000,
+      "memories": [
+        { "type": "CONSTRAINT", "summary": "Apache-2.0 compatibility is mandatory", "content": "Reject dependencies with incompatible distribution terms." },
+        { "type": "FACT", "summary": "Low priority historical note one", "content": "Unrelated detail." },
+        { "type": "FACT", "summary": "Low priority historical note two", "content": "Unrelated detail." },
+        { "type": "FACT", "summary": "Low priority historical note three", "content": "Unrelated detail." }
+      ],
+      "expected": ["Apache-2.0 compatibility is mandatory"]
+    }
+  ]
+}

@@ -11,10 +11,11 @@ import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-sto
 import { VERSION } from "../version.js";
 import { ApiError } from "./admin-errors.js";
 import { parseRecordMemoryInput } from "./admin-record-input.js";
+import { TASK_PHASES, TASK_STATUSES, emptyCheckpointState, type CheckpointState, type TaskPhase, type TaskStatus } from "../domain/context-os.js";
 
 export { ApiError } from "./admin-errors.js";
 
-export const ADMIN_API_VERSION = "1.2";
+export const ADMIN_API_VERSION = "1.4";
 export const ENGINE_VERSION = VERSION;
 export const ADMIN_CAPABILITIES = [
   "projects.status",
@@ -33,6 +34,18 @@ export const ADMIN_CAPABILITIES = [
   "memories.purge_preview",
   "memories.purge",
   "contexts.explain",
+  "contexts.build",
+  "contexts.packet_explain",
+  "tasks.list",
+  "tasks.get",
+  "tasks.create",
+  "tasks.checkpoint",
+  "tasks.checkpoints",
+  "tasks.runs",
+  "tasks.run_context",
+  "agents.connections",
+  "observations.distill",
+  "usage.context_os",
   "usage.token_savings",
   "usage.token_savings_reset",
   "projects.diagnostics",
@@ -71,6 +84,39 @@ function integer(value: unknown, label: string, fallback: number, minimum: numbe
     throw new ApiError("INVALID_ARGUMENT", `${label} must be an integer between ${minimum} and ${maximum}.`);
   }
   return value as number;
+}
+
+function stringArray(value: unknown, label: string, maximum = 100): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > maximum) throw new ApiError("INVALID_ARGUMENT", `${label} must be a bounded array.`);
+  return value.map((item, index) => text(item, `${label}[${index}]`, 4_096));
+}
+
+function checkpointState(value: unknown): CheckpointState {
+  if (value === undefined) return emptyCheckpointState();
+  const state = object(value, "state");
+  if (state.failedAttempts !== undefined && !Array.isArray(state.failedAttempts)) {
+    throw new ApiError("INVALID_ARGUMENT", "state.failedAttempts must be an array.");
+  }
+  if (state.verification !== undefined && !Array.isArray(state.verification)) {
+    throw new ApiError("INVALID_ARGUMENT", "state.verification must be an array.");
+  }
+  const failedAttempts = state.failedAttempts === undefined ? [] : state.failedAttempts.map((item, index) => {
+    const attempt = object(item, `state.failedAttempts[${index}]`);
+    return { approach: text(attempt.approach, "approach", 4_096), reason: text(attempt.reason, "reason", 4_096) };
+  });
+  const verification = state.verification === undefined ? [] : state.verification.map((item, index) => {
+    const check = object(item, `state.verification[${index}]`);
+    return { name: text(check.name, "name", 1_024), status: text(check.status, "status", 256) };
+  });
+  if (failedAttempts.length > 100 || verification.length > 100) throw new ApiError("INVALID_ARGUMENT", "Checkpoint collections are too large.");
+  return {
+    changed: stringArray(state.changed, "state.changed"), learned: stringArray(state.learned, "state.learned"),
+    decisionsAdded: stringArray(state.decisionsAdded, "state.decisionsAdded"),
+    constraintsAdded: stringArray(state.constraintsAdded, "state.constraintsAdded"), failedAttempts,
+    filesChanged: stringArray(state.filesChanged, "state.filesChanged", 200), verification,
+    unresolved: stringArray(state.unresolved, "state.unresolved"), remaining: stringArray(state.remaining, "state.remaining"),
+  };
 }
 
 export function safeError(error: unknown): { code: string; message: string } {
@@ -303,6 +349,97 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
       project.id,
       text(params.task, "task", 4096),
       integer(params.budget, "budget", 1000, 200, 4000),
+    ));
+  }
+  if (method === "tasks.list") {
+    return withProject(params.projectRoot, (store, project) => {
+      const status = optionalText(params.status, "status", 32)?.toUpperCase() as TaskStatus | undefined;
+      if (status && !TASK_STATUSES.includes(status)) throw new ApiError("INVALID_ARGUMENT", "Unsupported task status.");
+      return { items: store.contextOs().listTasks(project.id, status) };
+    });
+  }
+  if (method === "tasks.get") {
+    return withProject(params.projectRoot, (store, project) => {
+      const taskId = text(params.taskId, "taskId", 128);
+      const task = store.contextOs().getTask(project.id, taskId);
+      if (!task) throw new ApiError("NOT_FOUND", "The requested Task does not exist in this project.");
+      return task;
+    });
+  }
+  if (method === "tasks.create") {
+    return withProject(params.projectRoot, (store, project) => {
+      const phase = (optionalText(params.phase, "phase", 32)?.toUpperCase() ?? "DISCOVERY") as TaskPhase;
+      if (!TASK_PHASES.includes(phase)) throw new ApiError("INVALID_ARGUMENT", "Unsupported task phase.");
+      return store.contextOs().createTask(project.id, {
+        title: text(params.title, "title", 1_024), objective: text(params.objective, "objective", 16 * 1024), phase,
+        priority: integer(params.priority, "priority", 500, 0, 1_000),
+        ...(optionalText(params.parentTaskId, "parentTaskId", 128) ? { parentTaskId: String(params.parentTaskId) } : {}),
+      });
+    });
+  }
+  if (method === "tasks.checkpoint") {
+    return withProject(params.projectRoot, (store, project) => {
+      const status = text(params.status, "status", 32).toUpperCase() as TaskStatus;
+      const phase = text(params.phase, "phase", 32).toUpperCase() as TaskPhase;
+      if (!TASK_STATUSES.includes(status) || !TASK_PHASES.includes(phase)) {
+        throw new ApiError("INVALID_ARGUMENT", "Unsupported task status or phase.");
+      }
+      return store.contextOs().checkpoint(project.id, {
+        taskId: text(params.taskId, "taskId", 128), status, phase,
+        summary: text(params.summary, "summary", 4_096), state: checkpointState(params.state),
+        ...(optionalText(params.idempotencyKey, "idempotencyKey", 512) ? { idempotencyKey: String(params.idempotencyKey) } : {}),
+      });
+    });
+  }
+  if (method === "tasks.checkpoints") {
+    return withProject(params.projectRoot, (store, project) => ({
+      items: store.contextOs().listCheckpoints(
+        project.id,
+        text(params.taskId, "taskId", 128),
+        integer(params.limit, "limit", 20, 1, 100),
+      ),
+    }));
+  }
+  if (method === "tasks.runs") {
+    return withProject(params.projectRoot, (store, project) => ({
+      items: store.contextOs().listTaskRuns(
+        project.id,
+        text(params.taskId, "taskId", 128),
+        integer(params.limit, "limit", 20, 1, 100),
+      ),
+    }));
+  }
+  if (method === "tasks.run_context") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().getTaskRunContext(
+      project.id,
+      text(params.taskId, "taskId", 128),
+      text(params.runId, "runId", 128),
+    ));
+  }
+  if (method === "agents.connections") {
+    return withProject(params.projectRoot, (store, project) => ({ items: store.contextOs().listAgentConnections(project.id) }));
+  }
+  if (method === "contexts.build") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().buildContext(project.id, {
+      currentRequest: text(params.currentRequest, "currentRequest", 16 * 1024),
+      ...(optionalText(params.taskId, "taskId", 128) ? { taskId: String(params.taskId) } : {}),
+      maxTokens: integer(params.maxTokens, "maxTokens", 2_000, 400, 12_000),
+      ...(optionalText(params.provider, "provider", 128) ? { provider: String(params.provider) } : {}),
+    }));
+  }
+  if (method === "contexts.packet_explain") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().explainContext(
+      project.id, text(params.packetId, "packetId", 128),
+    ));
+  }
+  if (method === "observations.distill") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().distill(
+      project.id, integer(params.limit, "limit", 200, 1, 1_000),
+    ));
+  }
+  if (method === "usage.context_os") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().metrics(
+      project.id, optionalText(params.taskId, "taskId", 128),
     ));
   }
   if (method === "usage.token_savings") {

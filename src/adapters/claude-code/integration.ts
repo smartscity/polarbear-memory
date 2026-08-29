@@ -10,13 +10,16 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { ProjectBinding } from "../../platform/project.js";
+import { CLAUDE_HOOK_EVENTS } from "./hooks.js";
 
 const MCP_FILE = ".mcp.json";
 const RULE_FILE = join(".claude", "rules", "polarbear-memory.md");
 const SETTINGS_FILE = join(".claude", "settings.json");
-const MANAGED_RULE = `# Polarbear Memory
+const MANAGED_RULE = `# Polarbear Agent Context OS
 
-- At the start of a new session or when switching tasks, call \`memory_context\` before broad repository exploration.
+- At the start of a new session or when switching tasks, call \`context_get\` with the active task ID before broad repository exploration.
+- Use \`task_get\` for durable task state and \`task_checkpoint\` at meaningful boundaries, before compaction, and before handoff.
+- Record explicit decisions and constraints with \`decision_record\` and \`constraint_record\`.
 - Use \`memory_get\` only when a returned Memory needs its full evidence or details.
 - Use \`memory_search\` when the user asks about historical decisions, failures, conventions, or previous task state.
 - Record only reusable decisions, pitfalls, current task state, and concrete TODOs. Never record full transcripts, secrets, or conversational filler.
@@ -100,7 +103,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function isManagedHook(entry: unknown, command: string, event: "Stop" | "SessionEnd"): boolean {
+function isManagedHook(entry: unknown, command: string, event: typeof CLAUDE_HOOK_EVENTS[number]): boolean {
   if (!entry || typeof entry !== "object") return false;
   const hooks = (entry as { hooks?: unknown }).hooks;
   if (!Array.isArray(hooks)) return false;
@@ -124,7 +127,7 @@ function desiredClaudeSettings(existing: string | null, command: string): string
     throw new Error("Existing Claude settings hooks must be a JSON object.");
   }
   const hooks = { ...(currentHooks as Record<string, unknown> | undefined) };
-  for (const event of ["Stop", "SessionEnd"] as const) {
+  for (const event of CLAUDE_HOOK_EVENTS) {
     const current = hooks[event];
     if (current !== undefined && !Array.isArray(current)) throw new Error(`Claude ${event} hooks must be an array.`);
     const entries = (current ?? []) as unknown[];
@@ -135,7 +138,7 @@ function desiredClaudeSettings(existing: string | null, command: string): string
         hooks: [{
           type: "command",
           command: `${shellQuote(command)} hook ingest --event ${event}`,
-          timeout: event === "SessionEnd" ? 5 : 2,
+          timeout: event === "SessionEnd" || event === "PreCompact" || event === "SessionStart" ? 5 : 2,
         }],
       },
     ];
@@ -250,7 +253,7 @@ function managedMemoryHook(entry: unknown): boolean {
   return hooks.some((hook) => {
     if (!hook || typeof hook !== "object") return false;
     const command = (hook as { command?: unknown }).command;
-    return typeof command === "string" && /(?:polarbear-memory|\/cli\.js)'? hook ingest --event (?:Stop|SessionEnd)$/u.test(command);
+    return typeof command === "string" && /(?:polarbear-memory|\/cli\.js)'? hook ingest --event (?:SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd)$/u.test(command);
   });
 }
 
@@ -263,7 +266,7 @@ function removeManagedHooks(content: string | null): { content: string | null; r
   if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return { content, removed: 0 };
   const nextHooks = { ...(hooks as Record<string, unknown>) };
   let removed = 0;
-  for (const event of ["Stop", "SessionEnd"] as const) {
+  for (const event of CLAUDE_HOOK_EVENTS) {
     const entries = nextHooks[event];
     if (!Array.isArray(entries)) continue;
     nextHooks[event] = entries.filter((entry) => {

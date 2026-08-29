@@ -11,21 +11,23 @@ import { loadProject, readProjectPolicy, type ProjectBinding, type ProjectPolicy
 import { redactText } from "../../security/redaction.js";
 import { SqliteMemoryStore } from "../../storage/sqlite-store.js";
 
-const HookInput = z.discriminatedUnion("hook_event_name", [
-  z.object({
-    hook_event_name: z.literal("Stop"),
-    session_id: z.string().min(1).max(512),
-    cwd: z.string().min(1).max(4_096),
-    last_assistant_message: z.string().max(256 * 1024),
-    stop_hook_active: z.boolean().optional(),
-  }).passthrough(),
-  z.object({
-    hook_event_name: z.literal("SessionEnd"),
-    session_id: z.string().min(1).max(512),
-    cwd: z.string().min(1).max(4_096),
-    reason: z.string().min(1).max(256),
-  }).passthrough(),
-]);
+export const CLAUDE_HOOK_EVENTS = [
+  "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact", "Stop", "SessionEnd",
+] as const;
+
+const HookInput = z.object({
+  hook_event_name: z.enum(CLAUDE_HOOK_EVENTS),
+  session_id: z.string().min(1).max(512),
+  cwd: z.string().min(1).max(4_096),
+  last_assistant_message: z.string().max(256 * 1024).optional(),
+  stop_hook_active: z.boolean().optional(),
+  reason: z.string().max(256).optional(),
+  prompt: z.string().max(256 * 1024).optional(),
+  tool_name: z.string().max(512).optional(),
+  tool_input: z.unknown().optional(),
+  tool_response: z.unknown().optional(),
+  source: z.string().max(256).optional(),
+}).passthrough();
 
 export const EventEnvelopeSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -33,7 +35,11 @@ export const EventEnvelopeSchema = z.object({
   projectId: z.uuid(),
   sessionRefHash: z.string().regex(/^[a-f0-9]{64}$/u),
   agentKind: z.literal("claude-code"),
-  eventType: z.enum(["AGENT_STOP", "AGENT_SESSION_END", "CLAUDE_STOP", "CLAUDE_SESSION_END"]),
+  eventType: z.enum([
+    "AGENT_SESSION_START", "AGENT_USER_PROMPT", "AGENT_PRE_TOOL", "AGENT_POST_TOOL",
+    "AGENT_PRE_COMPACT", "AGENT_POST_COMPACT", "AGENT_STOP", "AGENT_SESSION_END",
+    "CLAUDE_STOP", "CLAUDE_SESSION_END",
+  ]),
   payload: z.record(z.string(), z.union([z.string(), z.boolean()])),
   payloadDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   occurredAt: z.iso.datetime(),
@@ -46,13 +52,27 @@ function sha256(value: string): string {
 }
 
 function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.infer<typeof HookInput>, now: Date): EventEnvelope {
-  const eventType = raw.hook_event_name === "Stop" ? "AGENT_STOP" : "AGENT_SESSION_END";
-  const payload: Record<string, string | boolean> = raw.hook_event_name === "Stop"
-    ? {
-        lastAssistantMessage: redactText(raw.last_assistant_message.slice(0, 32 * 1024), homedir()),
-        stopHookActive: raw.stop_hook_active ?? false,
-      }
-    : { reason: redactText(raw.reason, homedir()) };
+  const eventTypes = {
+    SessionStart: "AGENT_SESSION_START", UserPromptSubmit: "AGENT_USER_PROMPT", PreToolUse: "AGENT_PRE_TOOL",
+    PostToolUse: "AGENT_POST_TOOL", PreCompact: "AGENT_PRE_COMPACT", PostCompact: "AGENT_POST_COMPACT",
+    Stop: "AGENT_STOP", SessionEnd: "AGENT_SESSION_END",
+  } as const;
+  const eventType = eventTypes[raw.hook_event_name];
+  const boundedJson = (value: unknown): string => redactText(JSON.stringify(value ?? {}).slice(0, 32 * 1024), homedir());
+  const payload: Record<string, string | boolean> = {
+    hookEventName: raw.hook_event_name,
+    ...(raw.last_assistant_message ? { lastAssistantMessage: redactText(raw.last_assistant_message.slice(0, 32 * 1024), homedir()) } : {}),
+    ...(raw.prompt ? {
+      promptDigest: sha256(redactText(raw.prompt, homedir())),
+      promptBytes: String(Buffer.byteLength(raw.prompt, "utf8")),
+    } : {}),
+    ...(raw.tool_name ? { toolName: raw.tool_name } : {}),
+    ...(raw.tool_input !== undefined ? { toolInput: boundedJson(raw.tool_input) } : {}),
+    ...(raw.tool_response !== undefined ? { toolResponse: boundedJson(raw.tool_response) } : {}),
+    ...(raw.reason ? { reason: redactText(raw.reason, homedir()) } : {}),
+    ...(raw.source ? { source: raw.source } : {}),
+    ...(raw.hook_event_name === "Stop" ? { stopHookActive: raw.stop_hook_active ?? false } : {}),
+  };
   const payloadJson = JSON.stringify(payload);
   const payloadDigest = sha256(payloadJson);
   const sessionRefHash = sha256(raw.session_id);
@@ -89,6 +109,7 @@ export interface HookIngestionResult {
   accepted: boolean;
   spooled: boolean;
   finalized: number;
+  additionalContext?: string;
 }
 
 export function replaySpool(project: ProjectBinding, store: SqliteMemoryStore): {
@@ -108,6 +129,11 @@ export function replaySpool(project: ProjectBinding, store: SqliteMemoryStore): 
       const envelope = EventEnvelopeSchema.parse(JSON.parse(readFileSync(path, "utf8")));
       if (envelope.projectId !== project.id) throw new Error("Spool project mismatch.");
       store.ingestRawEvent(envelope);
+      store.contextOs().recordObservation(project.id, {
+        provider: "claude-code", eventType: envelope.eventType, payload: envelope.payload, artifactRefs: [],
+        estimatedTokens: Math.ceil(Buffer.byteLength(JSON.stringify(envelope.payload), "utf8") / 4), importance: 400,
+        occurredAt: envelope.occurredAt, sourceFingerprint: envelope.id,
+      });
       if (envelope.eventType === "AGENT_SESSION_END" || envelope.eventType === "CLAUDE_SESSION_END") endedSessions.add(envelope.sessionRefHash);
       unlinkSync(path);
       replayed += 1;
@@ -142,8 +168,29 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
       });
     }
     const accepted = store.ingestRawEvent(envelope);
+    const taskId = process.env.POLARBEAR_TASK_ID;
+    const task = taskId ? store.contextOs().getTask(project.id, taskId) : undefined;
+    store.contextOs().recordObservation(project.id, {
+      ...(task ? { taskId: task.id } : {}), provider: "claude-code", eventType: envelope.eventType,
+      payload: envelope.payload, artifactRefs: [],
+      estimatedTokens: Math.ceil(Buffer.byteLength(JSON.stringify(envelope.payload), "utf8") / 4),
+      importance: envelope.eventType === "AGENT_PRE_COMPACT" || envelope.eventType === "AGENT_SESSION_END" ? 900 : 400,
+      occurredAt: envelope.occurredAt, sourceFingerprint: envelope.id,
+    });
+    if (task && envelope.eventType === "AGENT_PRE_COMPACT") {
+      store.contextOs().checkpoint(project.id, {
+        taskId: task.id, status: task.status, phase: task.phase,
+        summary: "Claude Code reached a provider compaction boundary.",
+        state: {
+          changed: [], learned: ["Claude Code reached a provider compaction boundary."], decisionsAdded: [],
+          constraintsAdded: [], failedAttempts: [], filesChanged: [], verification: [], unresolved: [],
+          remaining: [task.objective],
+        }, idempotencyKey: envelope.id,
+      });
+    }
     let finalized = 0;
     if (envelope.eventType === "AGENT_SESSION_END") {
+      store.contextOs().distill(project.id, 200);
       finalized = finalizeSessionEvents(store, project.id, envelope.sessionRefHash, {
         branchName: inputGit.branch,
         commitSha: inputGit.head,
@@ -162,7 +209,12 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
     if (policy.rawEventRetentionDays > 0 || envelope.eventType === "AGENT_SESSION_END") {
       store.deleteExpiredRawEvents(project.id, now.toISOString());
     }
-    return { accepted, spooled: false, finalized };
+    const additionalContext = task && envelope.eventType === "AGENT_SESSION_START"
+      ? store.contextOs().buildContext(project.id, {
+          taskId: task.id, currentRequest: "Start or resume the active task.", provider: "claude-code", maxTokens: 2_000,
+        }).rendered
+      : undefined;
+    return { accepted, spooled: false, finalized, ...(additionalContext ? { additionalContext } : {}) };
   } catch (error) {
     try {
       writeSpool(project, envelope);

@@ -1882,3 +1882,8 @@ Rust 的定位是“被数据证明后抽取的性能内核”，不是产品控
 ## 31. UML 与代码结构补充
 
 代码职责、最终 As-built UML、关键时序、设计模式和结构治理 Roadmap 见 [`TRD_UML_DESIGN.md`](./TRD_UML_DESIGN.md)。工程实现必须同时遵守仓库根目录 [`AGENTS.md`](../AGENTS.md)。图纸采用仓库内 Mermaid 文本，不依赖任何远程渲染服务。
+# Agent Context OS upgrade
+
+The schema v8 and Admin API 1.4 upgrade extends the approved Option B memory architecture into an Agent Context Operating System. The normative English design addendum is [CONTEXT_OS_DESIGN.md](./CONTEXT_OS_DESIGN.md). It defines the durable Task and Checkpoint model, immutable budgeted Context Packets, provider-neutral runtime boundary, Codex and Claude Code adapters, deterministic rotation, observation/distillation flow, security controls, migration behavior, and delivery status. The local Admin API exposes bounded task checkpoint history, task execution history, task-scoped run Context inspection, and persisted Agent activity summaries. Agent activity is derived only from Engine-owned sessions and runs; the Engine does not probe external provider processes.
+
+The operational workflow is documented in [CONTEXT_OS_USER_GUIDE.md](./CONTEXT_OS_USER_GUIDE.md). Existing Memory APIs, persisted knowledge, MCP tools, and CLI behavior remain backward compatible.

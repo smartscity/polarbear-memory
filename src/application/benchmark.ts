@@ -4,6 +4,7 @@ import { compileContext } from "./context.js";
 import { runMaintenance } from "./maintenance.js";
 import type { MemoryStore } from "./ports.js";
 import { parseMemoryType, type RecordMemoryInput } from "../domain/memory.js";
+import { emptyCheckpointState } from "../domain/context-os.js";
 
 interface FixtureRecord {
   type: string;
@@ -47,7 +48,25 @@ interface RetentionSuiteFixture {
   criticalPitfallSummary: string;
 }
 
-function readFixture(path: string): Fixture | ResumeSuiteFixture | RetentionSuiteFixture {
+interface ContextOsScenario {
+  id: string;
+  title: string;
+  objective: string;
+  request: string;
+  budget: number;
+  rawHistoryTokens: number;
+  memories: FixtureRecord[];
+  expected: string[];
+  checkpoint?: { summary: string; learned?: string[]; remaining?: string[] };
+}
+
+interface ContextOsSuiteFixture {
+  kind: "context-os-suite";
+  name: string;
+  scenarios: ContextOsScenario[];
+}
+
+function readFixture(path: string): Fixture | ResumeSuiteFixture | RetentionSuiteFixture | ContextOsSuiteFixture {
   const parsed: unknown = JSON.parse(readFileSync(resolve(path), "utf8"));
   if (!parsed || typeof parsed !== "object") throw new Error("Fixture must be a JSON object.");
   if ((parsed as { kind?: unknown }).kind === "resume-suite") {
@@ -64,6 +83,13 @@ function readFixture(path: string): Fixture | ResumeSuiteFixture | RetentionSuit
       throw new Error("Retention suite requires name, 180 days and a critical pitfall oracle.");
     }
     return suite as RetentionSuiteFixture;
+  }
+  if ((parsed as { kind?: unknown }).kind === "context-os-suite") {
+    const suite = parsed as Partial<ContextOsSuiteFixture>;
+    if (typeof suite.name !== "string" || !Array.isArray(suite.scenarios) || suite.scenarios.length < 8) {
+      throw new Error("Context OS suite requires a name and at least eight scenarios.");
+    }
+    return suite as ContextOsSuiteFixture;
   }
   const value = parsed as Partial<Fixture>;
   if (typeof value.name !== "string" || typeof value.task !== "string" || !Number.isInteger(value.budget)) {
@@ -127,7 +153,22 @@ export interface RetentionSuiteResult {
   };
 }
 
-function recordFixtureMemory(store: MemoryStore, projectId: string, item: FixtureRecord): void {
+export interface ContextOsSuiteResult {
+  name: string;
+  kind: "context-os-suite";
+  passed: boolean;
+  scenarios: Array<{
+    id: string;
+    passed: boolean;
+    modeA: { strategy: "provider-history"; inputTokens: number };
+    modeB: { strategy: "memory-plus-history"; contextTokens: number; logicalInputTokens: number; oracleHits: number };
+    modeC: { strategy: "context-os"; contextTokens: number; logicalInputTokens: number; oracleHits: number; bounded: boolean; traceable: boolean };
+    reductionVsModeA: number;
+    reductionVsModeB: number;
+  }>;
+}
+
+function recordFixtureMemory(store: MemoryStore, projectId: string, item: FixtureRecord, taskId?: string): void {
   if (!item || typeof item.summary !== "string" || typeof item.type !== "string") {
     throw new Error("Every fixture memory requires type and summary.");
   }
@@ -135,6 +176,7 @@ function recordFixtureMemory(store: MemoryStore, projectId: string, item: Fixtur
     type: parseMemoryType(item.type),
     summary: item.summary,
     sourceType: "FIXTURE",
+    ...(taskId ? { scopeKind: "TASK", scopeRef: taskId } : {}),
     ...(typeof item.content === "string" ? { content: item.content } : {}),
     ...(Array.isArray(item.files) ? { files: item.files } : {}),
   };
@@ -270,15 +312,68 @@ function runRetentionSuite(
   return result;
 }
 
+function runContextOsSuite(store: MemoryStore, projectId: string, fixture: ContextOsSuiteFixture): ContextOsSuiteResult {
+  const scenarios = fixture.scenarios.map((scenario) => {
+    if (!scenario || typeof scenario.id !== "string" || typeof scenario.title !== "string"
+      || typeof scenario.objective !== "string" || typeof scenario.request !== "string"
+      || !Number.isInteger(scenario.budget) || !Number.isInteger(scenario.rawHistoryTokens)
+      || !Array.isArray(scenario.memories) || !Array.isArray(scenario.expected)) {
+      throw new Error("Every Context OS scenario requires identity, task, budget, history, memories and expected oracles.");
+    }
+    const task = store.contextOs().createTask(projectId, {
+      title: scenario.title, objective: scenario.objective, phase: "IMPLEMENTATION",
+    });
+    for (const memory of scenario.memories) {
+      recordFixtureMemory(store, projectId, memory, task.id);
+    }
+    if (scenario.checkpoint) {
+      store.contextOs().checkpoint(projectId, {
+        taskId: task.id, status: "ACTIVE", phase: "IMPLEMENTATION", summary: scenario.checkpoint.summary,
+        state: {
+          ...emptyCheckpointState(), learned: scenario.checkpoint.learned ?? [], remaining: scenario.checkpoint.remaining ?? [],
+        },
+      });
+    }
+    const memoryContext = compileContext(store, projectId, scenario.request, scenario.budget);
+    const packet = store.contextOs().buildContext(projectId, {
+      taskId: task.id, currentRequest: scenario.request, maxTokens: scenario.budget, provider: "evaluation",
+    });
+    const modeBHits = scenario.expected.filter((oracle) => memoryContext.markdown.includes(oracle)).length;
+    const modeCHits = scenario.expected.filter((oracle) => packet.rendered.includes(oracle)).length;
+    const bounded = packet.estimatedTokens <= scenario.budget;
+    const traceable = packet.items.every((item) => Boolean(item.sourceId && item.reason));
+    const modeBInput = scenario.rawHistoryTokens + memoryContext.estimatedTokens;
+    const modeCInput = packet.estimatedTokens;
+    const percent = (baseline: number, treatment: number) => baseline === 0 ? 0 : Math.round((1 - treatment / baseline) * 1_000) / 10;
+    return {
+      id: scenario.id,
+      passed: modeCHits === scenario.expected.length && bounded && traceable,
+      modeA: { strategy: "provider-history" as const, inputTokens: scenario.rawHistoryTokens },
+      modeB: {
+        strategy: "memory-plus-history" as const, contextTokens: memoryContext.estimatedTokens,
+        logicalInputTokens: modeBInput, oracleHits: modeBHits,
+      },
+      modeC: {
+        strategy: "context-os" as const, contextTokens: packet.estimatedTokens,
+        logicalInputTokens: modeCInput, oracleHits: modeCHits, bounded, traceable,
+      },
+      reductionVsModeA: percent(scenario.rawHistoryTokens, modeCInput),
+      reductionVsModeB: percent(modeBInput, modeCInput),
+    };
+  });
+  return { name: fixture.name, kind: "context-os-suite", passed: scenarios.every((scenario) => scenario.passed), scenarios };
+}
+
 export function runBenchmark(
   store: MemoryStore,
   projectId: string,
   fixturePath: string,
   repoRoot = process.cwd(),
-): BenchmarkResult | ResumeSuiteResult | RetentionSuiteResult {
+): BenchmarkResult | ResumeSuiteResult | RetentionSuiteResult | ContextOsSuiteResult {
   const fixture = readFixture(fixturePath);
   if (fixture.kind === "resume-suite") return runResumeSuite(store, projectId, fixture);
   if (fixture.kind === "retention-suite") return runRetentionSuite(store, projectId, fixture, repoRoot);
+  if (fixture.kind === "context-os-suite") return runContextOsSuite(store, projectId, fixture);
   for (const item of fixture.memories) {
     recordFixtureMemory(store, projectId, item);
   }

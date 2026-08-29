@@ -9,6 +9,7 @@ import { KnowledgeRepository, validateReason } from "./knowledge-repository.js";
 import { recordLifecycleAssessment } from "./lifecycle-assessments.js";
 import type { MemoryProjectionRow as MemoryRow } from "./memory-read-model.js";
 import { inImmediateTransaction } from "./sqlite-transaction.js";
+import { redactText } from "../security/redaction.js";
 
 /** Owns canonical Knowledge write use cases and relation invariants. */
 export class KnowledgeCommandService {
@@ -26,13 +27,14 @@ export class KnowledgeCommandService {
     validateRecordInput(input);
     const id = randomUUID();
     const now = new Date().toISOString();
-    const content = input.content?.trim() || input.summary.trim();
+    const summary = redactText(input.summary.trim());
+    const content = redactText(input.content?.trim() || summary);
     const confidence = input.confidence ?? 700;
     const importance = input.importance ?? 500;
     const sourceType = input.sourceType ?? "CLI";
     const completionState = input.completionState ?? "OPEN";
-    const hash = createHash("sha256").update(`${input.type}\0${input.summary.trim()}\0${content}`).digest("hex");
-    const versionHash = createHash("sha256").update(`${input.summary.trim()}\0${content}`).digest("hex");
+    const hash = createHash("sha256").update(`${input.type}\0${summary}\0${content}`).digest("hex");
+    const versionHash = createHash("sha256").update(`${summary}\0${content}`).digest("hex");
     const supersededIds: string[] = [];
 
     const storedId = inImmediateTransaction(this.#database, () => {
@@ -75,12 +77,13 @@ export class KnowledgeCommandService {
       }
       this.#database.prepare(`
         INSERT INTO knowledge_units(
-          id, workspace_id, project_id, kind, summary, body, confidence_milli, importance_milli,
+          id, workspace_id, project_id, kind, summary, body, scope_kind, scope_ref, confidence_milli, importance_milli,
           relevance_milli, completion_state, completed_at, valid_from, valid_to,
           current_content_hash, created_at, updated_at, extractor_version
-        ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, projectId, input.type, input.summary.trim(), content, confidence, importance,
+        id, projectId, input.type, summary, content, input.scopeKind ?? null, input.scopeRef ?? null,
+        confidence, importance,
         completionState === "OPEN" ? importance : 0,
         completionState,
         completionState === "OPEN" ? null : now,
@@ -98,13 +101,13 @@ export class KnowledgeCommandService {
         randomUUID(),
         id,
         content,
-        input.summary.trim(),
+        summary,
         versionHash,
         input.validFrom ?? now,
         sourceType === "CLI" ? "HUMAN_CLI" : sourceType === "MCP" ? "AGENT_MCP" : "SYSTEM",
         now,
       );
-      this.#knowledge.recordOrigin(projectId, id, input, content, hash, now);
+      this.#knowledge.recordOrigin(projectId, id, { ...input, summary }, content, hash, now);
       for (const evidenceId of new Set(input.evidenceIds ?? [])) {
         const exists = this.#database.prepare("SELECT 1 FROM evidence WHERE project_id = ? AND id = ?").get(projectId, evidenceId);
         if (!exists) throw new Error(`Evidence not found: ${evidenceId}`);

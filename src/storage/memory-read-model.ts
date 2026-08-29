@@ -9,6 +9,8 @@ export interface MemoryProjectionRow {
   type: string;
   summary: string;
   content: string;
+  scope_kind: string | null;
+  scope_ref: string | null;
   lifecycle_status: string;
   verification_state: string;
   correctness_risk: string;
@@ -100,6 +102,8 @@ export function hydrateMemories(database: DatabaseSync, rows: MemoryProjectionRo
       type: row.type as MemoryType,
       summary: row.summary,
       content: row.content,
+      ...(row.scope_kind ? { scopeKind: row.scope_kind } : {}),
+      ...(row.scope_ref ? { scopeRef: row.scope_ref } : {}),
       lifecycleStatus: row.lifecycle_status as Memory["lifecycleStatus"],
       verificationState: row.verification_state as Memory["verificationState"],
       correctnessRisk: (row.correctness_risk ?? "LOW") as CorrectnessRisk,

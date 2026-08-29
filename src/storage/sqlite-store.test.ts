@@ -224,6 +224,52 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
   }
 });
 
+test("migrates schema v7 to Context OS v8 without changing existing knowledge", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-v7-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const projectId = "99999999-9999-4999-8999-999999999999";
+  const initial = new SqliteMemoryStore(path);
+  initial.initializeProject({ id: projectId, name: "v7-fixture" });
+  const memory = initial.record(projectId, { type: "DECISION", summary: "Preserve schema v7 knowledge" });
+  initial.close();
+
+  const v7 = new DatabaseSync(path);
+  v7.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE usage_ledger;
+    DROP TABLE context_packet_items;
+    DROP TABLE context_packets;
+    DROP TABLE retrieval_runs;
+    DROP TABLE checkpoints;
+    DROP TABLE observations;
+    DROP TABLE execution_runs;
+    DROP TABLE agent_sessions;
+    DROP TABLE tasks;
+    DELETE FROM schema_migrations WHERE version = 8;
+  `);
+  v7.close();
+
+  const migrated = new SqliteMemoryStore(path);
+  try {
+    assert.equal(migrated.get(projectId, memory.id)?.summary, "Preserve schema v7 knowledge");
+    const task = migrated.contextOs().createTask(projectId, {
+      title: "Validate migration", objective: "Verify the additive v8 migration.",
+    });
+    assert.equal(migrated.contextOs().getTask(projectId, task.id)?.id, task.id);
+  } finally {
+    migrated.close();
+  }
+  assert.equal(readdirSync(join(directory, "backups", "migrations")).filter((name) => name.endsWith(".db")).length, 1);
+  const verified = new DatabaseSync(path, { readOnly: true });
+  try {
+    assert.equal((verified.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 8);
+    assert.equal(verified.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally {
+    verified.close();
+  }
+});
+
 test("refuses to open a database created by a newer Engine", () => {
   const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-newer-"));
   temporaryDirectories.push(directory);

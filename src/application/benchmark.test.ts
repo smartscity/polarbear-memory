@@ -53,3 +53,21 @@ test("malicious Memory fixture remains quoted untrusted data", () => {
     store.close();
   }
 });
+
+test("Context OS A/B/C suite is reproducible in a fresh project", () => {
+  const store = new SqliteMemoryStore(":memory:");
+  const projectId = "88888888-8888-4888-8888-888888888888";
+  store.initializeProject({ id: projectId, name: "context-os-suite" });
+  try {
+    const result = runBenchmark(store, projectId, resolve("fixtures/context-os-ab-c/fixture.json"));
+    if (!("kind" in result) || result.kind !== "context-os-suite") {
+      throw new Error("Expected Context OS suite result.");
+    }
+    assert.equal(result.scenarios.length, 8);
+    assert.equal(result.passed, true);
+    assert.ok(result.scenarios.every((scenario) => scenario.modeC.bounded && scenario.modeC.traceable));
+    assert.ok(result.scenarios.every((scenario) => scenario.reductionVsModeA > 0));
+  } finally {
+    store.close();
+  }
+});

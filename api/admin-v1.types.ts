@@ -5,6 +5,9 @@ export type CompletionState = "OPEN" | "COMPLETED" | "CANCELLED";
 export type MemoryRelationType = "SUPERSEDES" | "CONTRADICTS" | "EXTENDS" | "DERIVES" | "DEPENDS_ON" | "RELATED_TO";
 export type EntityKind = "MODULE" | "FILE" | "SYMBOL" | "SERVICE" | "API" | "DATABASE_TABLE" | "DEPENDENCY" | "ISSUE" | "CONCEPT";
 export type EntityRole = "SUBJECT" | "AFFECTS" | "REFERENCES" | "DEPENDS_ON" | "RELATED";
+export type TaskStatus = "PLANNED" | "ACTIVE" | "BLOCKED" | "VERIFYING" | "DONE" | "CANCELLED";
+export type TaskPhase = "DISCOVERY" | "DESIGN" | "IMPLEMENTATION" | "DEBUGGING" | "VERIFICATION" | "REVIEW" | "DOCUMENTATION";
+export type ContextCategory = "OBJECTIVE" | "WORKING_MEMORY" | "CONSTRAINTS" | "DECISIONS" | "ARCHITECTURE" | "EPISODES" | "VERIFICATION" | "SEMANTIC" | "SOURCES";
 
 export type FileAnchor = {
   path: string; entityId?: string; symbol?: string; startLine?: number; endLine?: number;
@@ -33,7 +36,7 @@ export type MemoryRecord = {
   revisionCount: number;
   latestAssessment?: { previousRisk: string; newRisk: string; previousLifecycle: string; newLifecycle: string; relevance: number; checkedCommit?: string; reasonCodes: string[]; policyVersion: string; assessorVersion: string; assessedAt: string };
   lastCheckedCommit?: string; lastAssessedAt?: string; completedAt?: string; restoreProtectedUntil?: string;
-  createdAt: string; updatedAt: string; validFrom?: string; validTo?: string;
+  createdAt: string; updatedAt: string; validFrom?: string; validTo?: string; scopeKind?: string; scopeRef?: string;
   evidence: Array<{ evidence: Evidence; role: "ORIGIN" | "SUPPORTS" | "VERIFIES" | "CONTRADICTS" | "INVALIDATES"; confidence: number }>;
   entities: Array<{ entity: Entity; role: EntityRole; confidence: number }>;
 };
@@ -47,6 +50,48 @@ export type RecordMemoryRequest = {
 export type TokenSavingsStats = {
   contextPackCount: number; candidateCount: number; selectedCount: number; baselineTokens: number; contextTokens: number;
   estimatedSavedTokens: number; measurementStartedAt: string; lastContextAt?: string; resetCount: number;
+};
+export type TaskRecord = {
+  id: string; projectId: string; title: string; objective: string; status: TaskStatus; phase: TaskPhase;
+  priority: number; parentTaskId?: string; lastCheckpointId?: string; createdAt: string; updatedAt: string; completedAt?: string;
+};
+export type CheckpointState = {
+  changed: string[]; learned: string[]; decisionsAdded: string[]; constraintsAdded: string[];
+  failedAttempts: Array<{ approach: string; reason: string }>; filesChanged: string[];
+  verification: Array<{ name: string; status: string }>; unresolved: string[]; remaining: string[];
+};
+export type TaskCheckpoint = {
+  id: string; projectId: string; taskId: string; executionRunId?: string; previousCheckpointId?: string;
+  status: TaskStatus; phase: TaskPhase; summary: string; state: CheckpointState; delta: Partial<CheckpointState>; createdAt: string;
+};
+export type ExecutionRun = {
+  id: string; projectId: string; taskId?: string; agentSessionId?: string; provider: string;
+  status: "PLANNED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"; phase: TaskPhase;
+  contextPacketId?: string; checkpointId?: string; rotationReason?: string; model?: string; startedAt: string; endedAt?: string;
+};
+export type AgentConnectionStatus = {
+  provider: string; integrationMode: "ASSISTED" | "MANAGED"; status: "ACTIVE" | "IDLE" | "FAILED";
+  lastSeenAt: string; activeRunCount: number;
+};
+export type ContextPacketItem = {
+  rank: number; sourceType: "TASK" | "CHECKPOINT" | "MEMORY"; sourceId: string; category: ContextCategory;
+  priority: 0 | 1 | 2 | 3; score: number; estimatedTokens: number; reason: string; content: string; truncated: boolean;
+};
+export type ContextPacket = {
+  id: string; projectId: string; taskId?: string; executionRunId?: string; version: number; currentRequest: string;
+  provider?: string; maxTokens: number; estimatedTokens: number; retrievalRunId: string; packetHash: string;
+  rendered: string; items: ContextPacketItem[]; createdAt: string;
+};
+export type ContextExplanation = {
+  packet: ContextPacket; budgetByCategory: Record<string, { used: number; limit: number }>;
+  excluded: Array<{ sourceId: string; category: ContextCategory; reason: string; estimatedTokens: number }>;
+};
+export type TaskRunContext = { run: ExecutionRun; packet?: ContextPacket };
+export type ContextOsMetrics = {
+  runs: number; successfulRuns: number; inputTokens: number; cachedInputTokens: number; outputTokens: number;
+  contextPacketTokens: number; contextInjectionRatio: number; contextReductionRatio: number;
+  contextReductionFactor: number; memoryHitRate: number; contextWasteRatio: number;
+  sessionCarryCostProxy: number; contextCostPerSuccessfulTask: number; averageAssemblyLatencyMs: number;
 };
 export type HelloResponse = { apiVersion: string; engineVersion: string; capabilities: MemoryCapability[]; transport: "local-user-socket" };
 export type ProjectStatusResponse = { project: { id: string; name: string }; counts: Record<string, number>; recent: MemoryRecord[] };
@@ -66,3 +111,6 @@ export type BackupRestorePreview = { backup: BackupInspection; confirmation: str
 export type BackupRestoreResult = { restored: BackupInspection; rollbackFileName: string | null };
 export type MemoryPurgePreview = { memory: Pick<MemoryRecord, "id" | "summary" | "type" | "revisionCount">; confirmation: string; warning: string };
 export type MemoryPurgeResult = { purgedMemoryIdHash: string };
+export type TaskCheckpointListResponse = { items: TaskCheckpoint[] };
+export type TaskRunListResponse = { items: ExecutionRun[] };
+export type AgentConnectionListResponse = { items: AgentConnectionStatus[] };

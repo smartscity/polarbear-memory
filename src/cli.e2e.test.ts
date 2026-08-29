@@ -136,7 +136,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const client = new Client({ name: "stdio-e2e", version: "1.0.0" });
     try {
       await client.connect(transport);
-      assert.equal((await client.listTools()).tools.length, 5);
+      assert.equal((await client.listTools()).tools.length, 12);
       const contextOverStdio = await client.callTool({
         name: "memory_context",
         arguments: { task: "settlement retry", budget: 400 },

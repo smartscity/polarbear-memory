@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { installClaudeIntegration, restoreLatestClaudeIntegration } from "../adapters/claude-code/integration.js";
 import { discoverGitContext } from "../platform/git.js";
 import { loadProject } from "../platform/project.js";
+import { CLAUDE_HOOK_EVENTS } from "../adapters/claude-code/hooks.js";
 
 export function runClaudeCommand(cwd: string, args: string[]): void {
   const [action, ...rest] = args;
@@ -39,11 +40,14 @@ export async function runHookCommand(cwd: string, args: string[]): Promise<void>
   if (action !== "ingest") return;
   try {
     const parsed = parseArgs({ args: rest, options: { event: { type: "string" } }, strict: true });
-    if (parsed.values.event !== "Stop" && parsed.values.event !== "SessionEnd") return;
+    if (!CLAUDE_HOOK_EVENTS.includes(parsed.values.event as typeof CLAUDE_HOOK_EVENTS[number])) return;
     const raw: unknown = JSON.parse(await readStdinBounded(256 * 1024));
     if (!raw || typeof raw !== "object" || (raw as { hook_event_name?: unknown }).hook_event_name !== parsed.values.event) return;
     const { ingestClaudeHook } = await import("../adapters/claude-code/hooks.js");
-    ingestClaudeHook(raw, cwd);
+    const result = ingestClaudeHook(raw, cwd);
+    if (parsed.values.event === "SessionStart" && result.additionalContext) {
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: result.additionalContext } }));
+    }
   } catch {
     // Hooks are observational and must never block Claude Code or write protocol noise.
   }

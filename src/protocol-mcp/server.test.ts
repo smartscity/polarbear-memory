@@ -48,11 +48,14 @@ async function connected(includeAdminTools = false) {
   return { store, server, client };
 }
 
-test("default MCP surface exposes five bounded Agent tools", async () => {
+test("default MCP surface preserves Memory tools and adds Context OS tools", async () => {
   const { store, server, client } = await connected();
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ["memory_context", "memory_get", "memory_record", "memory_search", "memory_verify"]);
+    assert.deepEqual(names, [
+      "constraint_record", "context_explain", "context_get", "decision_record", "memory_context", "memory_feedback",
+      "memory_get", "memory_record", "memory_search", "memory_verify", "task_checkpoint", "task_get",
+    ]);
     await assert.rejects(client.callTool({ name: "memory_status", arguments: {} }));
     const invalidBudget = await client.callTool({
       name: "memory_context",
@@ -93,11 +96,46 @@ test("default MCP surface exposes five bounded Agent tools", async () => {
   }
 });
 
+test("Context OS MCP flow checkpoints a task and explains a bounded packet", async () => {
+  const { store, server, client } = await connected();
+  try {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    const task = store.contextOs().createTask(projectId, {
+      title: "Settlement retry", objective: "Implement and verify bounded settlement retry.", phase: "IMPLEMENTATION",
+    });
+    const decision = await client.callTool({
+      name: "decision_record",
+      arguments: { task_id: task.id, summary: "Retry from reconciliation", rationale: "The terminal failure is asynchronous." },
+    });
+    assert.match(firstText(decision), /Retry from reconciliation/u);
+    const checkpoint = await client.callTool({
+      name: "task_checkpoint",
+      arguments: {
+        task_id: task.id, status: "ACTIVE", phase: "IMPLEMENTATION", summary: "Retry counter added.",
+        state: { changed: ["Added retry counter."], remaining: ["Add integration coverage."] },
+      },
+    });
+    assert.match(firstText(checkpoint), /Retry counter added/u);
+    const context = await client.callTool({
+      name: "context_get",
+      arguments: { task_id: task.id, current_request: "Continue settlement retry", max_tokens: 600, provider: "codex" },
+    });
+    const packet = JSON.parse(firstText(context)) as { id: string; estimatedTokens: number; maxTokens: number };
+    assert.ok(packet.estimatedTokens <= packet.maxTokens);
+    const explanation = await client.callTool({ name: "context_explain", arguments: { packet_id: packet.id } });
+    assert.match(firstText(explanation), /budgetByCategory/u);
+  } finally {
+    await client.close();
+    await server.close();
+    store.close();
+  }
+});
+
 test("admin MCP surface adds status and reversible forget only", async () => {
   const { store, server, client } = await connected(true);
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 7);
+    assert.equal(names.length, 14);
     assert.ok(names.includes("memory_status"));
     assert.ok(names.includes("memory_forget"));
 

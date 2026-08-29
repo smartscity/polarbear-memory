@@ -9,6 +9,7 @@ import { discoverGitContext, normalizeRepoFile } from "../platform/git.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 import type { ProjectBinding } from "../platform/project.js";
 import { VERSION } from "../version.js";
+import { registerContextOsTools } from "./context-os-tools.js";
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
@@ -63,6 +64,8 @@ export function createMemoryMcpServer(options: MemoryMcpOptions): McpServer {
       return safeError(error);
     }
   });
+
+  registerContextOsTools(server, store, project);
 
   server.registerTool("memory_get", {
     title: "Get one memory",

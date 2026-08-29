@@ -24,9 +24,12 @@ import type {
   Session,
 } from "../domain/knowledge.js";
 import type { MemoryStore, TokenSavingsStats } from "../application/ports.js";
+import type { ContextOsPort } from "../domain/context-os.js";
 import { acquireClientLease, type ClientLease } from "./client-lease.js";
 import { migrateLegacyToV2 } from "./migrate-v2.js";
-import { CURRENT_SCHEMA_VERSION, V2_MIGRATION_CHECKSUM, V2_SCHEMA } from "./schema-v2.js";
+import {
+  CONTEXT_OS_MIGRATION_CHECKSUM, CURRENT_SCHEMA_VERSION, V2_MIGRATION_CHECKSUM, V2_SCHEMA,
+} from "./schema-v2.js";
 import { KnowledgeSearchIndex } from "./knowledge-index.js";
 import { recordLifecycleAssessment } from "./lifecycle-assessments.js";
 import { inImmediateTransaction } from "./sqlite-transaction.js";
@@ -46,6 +49,7 @@ import { UsageService } from "./usage-service.js";
 import { KnowledgeCommandService } from "./knowledge-command-service.js";
 import { LifecycleService } from "./lifecycle-service.js";
 import { RawEventService } from "./raw-event-service.js";
+import { createContextOs } from "./context-os-factory.js";
 
 export { CURRENT_SCHEMA_VERSION } from "./schema-v2.js";
 
@@ -71,6 +75,7 @@ export class SqliteMemoryStore implements MemoryStore {
   readonly #commands!: KnowledgeCommandService;
   readonly #lifecycle!: LifecycleService;
   readonly #rawEvents!: RawEventService;
+  readonly #contextOs!: ContextOsPort;
   readonly #lease: ClientLease | undefined;
   #closed = false;
 
@@ -126,13 +131,32 @@ export class SqliteMemoryStore implements MemoryStore {
               SELECT memory_id, repo_relative_path FROM memory_files;
           `);
           migrateLegacyToV2(this.#db, migrationTime);
+        } else if (existing.version < 7) {
+          inImmediateTransaction(this.#db, () => {
+            this.#db.exec(V2_SCHEMA);
+            for (let version = 1; version < CURRENT_SCHEMA_VERSION; version += 1) {
+              this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at, checksum) VALUES (?, ?, ?)")
+                .run(version, migrationTime, version === 7 ? V2_MIGRATION_CHECKSUM : `legacy-v${version}`);
+            }
+          });
+        }
+        if (existing.version < CURRENT_SCHEMA_VERSION) {
+          inImmediateTransaction(this.#db, () => {
+            this.#db.exec("DROP VIEW IF EXISTS memory_projection");
+            this.#db.exec(V2_SCHEMA);
+            const violations = this.#db.prepare("PRAGMA foreign_key_check").all();
+            if (violations.length > 0) throw new Error("Context OS migration produced foreign-key violations.");
+            this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at, checksum) VALUES (?, ?, ?)")
+              .run(CURRENT_SCHEMA_VERSION, migrationTime, CONTEXT_OS_MIGRATION_CHECKSUM);
+          });
         } else {
           this.#db.exec(V2_SCHEMA);
-          for (let version = 1; version <= CURRENT_SCHEMA_VERSION; version += 1) {
-            this.#db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at, checksum) VALUES (?, ?, ?)")
-              .run(version, migrationTime, version === CURRENT_SCHEMA_VERSION ? V2_MIGRATION_CHECKSUM : `legacy-v${version}`);
-          }
         }
+        this.#contextOs = createContextOs(this.#db, {
+            search: (projectId, query, limit) => this.#queries.search(projectId, query, limit),
+            recent: (projectId, limit) => this.#queries.recent(projectId, limit),
+            record: (projectId, input) => this.#commands.record(projectId, input),
+        });
         this.#searchIndex.rebuild();
       } catch (error) {
         this.#db.close();
@@ -280,6 +304,10 @@ export class SqliteMemoryStore implements MemoryStore {
 
   resetTokenSavings(projectId: string, now: string): TokenSavingsStats {
     return this.#usage.resetTokenSavings(projectId, now);
+  }
+
+  contextOs(): ContextOsPort {
+    return this.#contextOs;
   }
 
   noteFeedback(projectId: string, memoryId: string, useful: boolean, reason: string): Memory {
