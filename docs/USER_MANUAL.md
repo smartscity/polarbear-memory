@@ -700,22 +700,22 @@ Memory
 
 v0.0.5 显示：
 
-- Memory 总量，以及全部九种 V2 Knowledge 类型筛选。
+- Total Memory count and filters for all nine V2 Knowledge types.
 - 活跃与待复核数量。
 - 按更新时间倒序的 Timeline。
 - 搜索和 lifecycle filter。
 
-上次 capture、adapter/storage health 是后续 Overview 增量，不应由 Desktop 直接查询 SQLite 补齐。
+Last capture time and adapter/storage health remain future Overview increments. Desktop must not query SQLite directly to obtain them.
 
 ### 17.2 Memory Detail
 
 v0.0.5 可以：
 
-- 创建九种 V2 Knowledge；可设置有效期、关联文件、已有 Evidence ID 和 Entity。
-- 查看惰性纯文本内容、来源类型、commit/branch、有效期、file anchor、Evidence、Entity、最新 lifecycle assessment、全部六种关系和 revision audit。
+- Create any of the nine V2 Knowledge types with temporal validity, related files, existing Evidence IDs, and Entities.
+- Inspect inert plaintext content, source type, commit and branch, temporal validity, file anchors, Evidence, Entities, the latest lifecycle assessment, all six relation types, and the revision audit.
 - verify、dispute、archive、restore。
-- 对 `TODO` / `TASK_STATE` 明确标记 completed 或 cancelled，并记录 useful / not-useful 反馈。
-- 使用明确 reason 建立 `SUPERSEDES`、`CONTRADICTS`、`EXTENDS`、`DERIVES`、`DEPENDS_ON` 或 `RELATED_TO` 关系。
+- Explicitly complete or cancel `TODO` and `TASK_STATE` records, and record useful or not-useful feedback.
+- Create `SUPERSEDES`, `CONTRADICTS`, `EXTENDS`, `DERIVES`, `DEPENDS_ON`, or `RELATED_TO` relations with an explicit reason.
 - 编辑摘要和正文；每次编辑形成新 revision，并把 verification 重置为 `UNVERIFIED`。
 - 预览永久清除影响范围，输入精确 `PURGE <memory-id>` 和理由后执行；正文、revision、anchor 和 relation 删除，只留下不含正文的哈希审计墓碑。
 - Promote to Markdown。
@@ -731,7 +731,7 @@ v0.0.5 可以：
 
 ### 17.4 Engine 管理
 
-Desktop 通过 Admin API 1.2 提供：
+Desktop provides the following through Admin API 1.2:
 
 - Engine/API/schema/runtime/platform diagnostics；诊断结果不包含数据库路径或 Memory 正文。
 - maintenance dry-run 预览，并在第二次明确操作后执行。
@@ -740,7 +740,7 @@ Desktop 通过 Admin API 1.2 提供：
 - 创建一致性 SQLite 备份、列出备份并重新校验 integrity/SHA-256。
 - 先预览数据库恢复，再输入精确 `RESTORE <backup-file>`；Engine 获取跨进程 maintenance lock、拒绝活跃 writer，并保留恢复前 rollback backup。
 - 显示 Engine 版本与 API capability。更新不主动联网检查，仍通过签名、公证的离线发行包完成。
-- 查看候选知识基线、实际 Context Pack 和估算节省 token；输入精确 `RESET` 只重置统计周期，不修改任何 Memory。
+- Inspect the candidate Knowledge baseline, delivered Context Pack, and estimated token savings. Entering the exact confirmation `RESET` only resets the measurement period and never changes Memory content.
 
 Desktop 的 Rust 代理先绑定当前已初始化 Git workspace；之后只接受同一 canonical workspace 的 allowlisted 请求。WebView 不持有 service token，也不能指定数据库路径。
 
@@ -1038,7 +1038,7 @@ polarbear-memory uninstall --keep-data
 
 ### Desktop 能完全管理 Memory 吗？
 
-能，而且始终通过完整 Admin API，不直接执行 SQL。当前 v0.1 Desktop 已覆盖 V2 Knowledge 创建与类型筛选、temporal validity、Evidence/Entity/file anchor、全部关系、修订、验证/争议、任务完成/取消、useful feedback、可恢复归档/恢复、明确批准的永久 purge、Context Explain、token savings 查看/重置、capture/retention 配置、maintenance、diagnostics、一致性备份/校验/恢复、Engine service 生命周期和 Promote。整个产品数据目录的安全卸载仍由 Human CLI 承担，因为它超出单一项目面板的作用域。
+Yes. Desktop always uses the complete Admin API and never executes SQL directly. The current v0.1 Desktop covers V2 Knowledge creation and type filters, temporal validity, Evidence, Entities, file anchors, all relations, revisions, verification and dispute, task completion and cancellation, usefulness feedback, recoverable archive and restore, explicitly approved permanent purge, Context Explain, token-savings inspection and reset, capture and retention configuration, maintenance, diagnostics, consistent backup verification and restore, Engine service lifecycle, and Promote. Safe uninstallation of the entire product data directory remains a Human CLI responsibility because it is outside a single-project panel's scope.
 
 ### 用户需要安装 Node.js 吗？
 

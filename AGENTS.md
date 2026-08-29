@@ -85,6 +85,7 @@ npm run package:check
 
 ## 8. 文档与工作区纪律
 
+- Language policy: all newly written or substantially revised documentation, architecture text, code comments, TSDoc/JSDoc, test descriptions, commit messages, and public contract descriptions must be written in English. Localized end-user resource files are the only exception; do not remove required translations.
 - 架构变化必须同步 `docs/TRD.md` 与 `docs/TRD_UML_DESIGN.md`。
 - Mermaid 图必须由文本本地渲染或由支持 Mermaid 的客户端展示，禁止远程渲染服务。
 - 保留用户已有的未提交修改；不得 reset、checkout 或覆盖无关文件。

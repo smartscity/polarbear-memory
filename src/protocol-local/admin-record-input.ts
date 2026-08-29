@@ -22,6 +22,14 @@ function optionalText(value: unknown, label: string, maxBytes: number): string |
   return value === undefined || value === null || value === "" ? undefined : requiredText(value, label, maxBytes);
 }
 
+function timestamp(value: unknown, label: string): string | undefined {
+  const raw = optionalText(value, label, 128);
+  if (!raw) return undefined;
+  const milliseconds = Date.parse(raw);
+  if (!Number.isFinite(milliseconds)) throw new ApiError("INVALID_ARGUMENT", `${label} must be an ISO-8601 timestamp.`);
+  return new Date(milliseconds).toISOString();
+}
+
 function enumValue<const T extends readonly string[]>(value: unknown, label: string, values: T, fallback?: T[number]): T[number] {
   if (value === undefined && fallback !== undefined) return fallback;
   const normalized = requiredText(value, label, 64).toUpperCase();
@@ -111,18 +119,24 @@ export function parseRecordMemoryInput(raw: Record<string, unknown>): RecordMemo
   const fileAnchors = anchors(raw.fileAnchors);
   const commitSha = optionalText(raw.commitSha, "commitSha", 256);
   const branchName = optionalText(raw.branchName, "branchName", 1024);
-  const validFrom = optionalText(raw.validFrom, "validFrom", 128);
-  const validTo = optionalText(raw.validTo, "validTo", 128);
+  const validFrom = timestamp(raw.validFrom, "validFrom");
+  const validTo = timestamp(raw.validTo, "validTo");
   const episodeId = optionalText(raw.episodeId, "episodeId", 256);
   const evidenceIds = stringArray(raw.evidenceIds, "evidenceIds", 100);
   const linkedEntities = entities(raw.entities);
+  const type = enumValue(raw.type, "type", MVP_MEMORY_TYPES);
+  const completionState = enumValue(raw.completionState, "completionState", COMPLETION_STATES, "OPEN");
+  if (completionState !== "OPEN" && type !== "TODO" && type !== "TASK_STATE") {
+    throw new ApiError("INVALID_ARGUMENT", "Only TODO and TASK_STATE can be recorded as completed or cancelled.");
+  }
+  if (validFrom && validTo && validTo < validFrom) throw new ApiError("INVALID_ARGUMENT", "validTo must not be earlier than validFrom.");
   return {
-    type: enumValue(raw.type, "type", MVP_MEMORY_TYPES),
+    type,
     summary: requiredText(raw.summary, "summary", 2048),
     ...(content ? { content } : {}),
     ...(files ? { files } : {}),
     ...(fileAnchors ? { fileAnchors } : {}),
-    completionState: enumValue(raw.completionState, "completionState", COMPLETION_STATES, "OPEN"),
+    completionState,
     sourceType: "CLI",
     ...(confidence === undefined ? {} : { confidence }),
     ...(importance === undefined ? {} : { importance }),
