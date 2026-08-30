@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { constants, accessSync, existsSync, statSync } from "node:fs";
 import { isAbsolute, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,138 +119,79 @@ export function minimalAgentEnvironment(
   return environment;
 }
 
-export function probeMcpLaunch(
-  spec: AgentLaunchSpec,
-  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-): Promise<AgentLaunchProbe> {
+interface McpProbeOptions {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}
+
+function closesWithin(closePromise: Promise<void>, milliseconds: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(spec.command, spec.args, {
+    const timer = setTimeout(() => resolve(false), milliseconds);
+    void closePromise.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+class McpLaunchProbeSession {
+  private readonly child: ChildProcessWithoutNullStreams;
+  private readonly pid: number | undefined;
+  private readonly closePromise: Promise<void>;
+  private readonly timeoutMs: number;
+  private finalizing = false;
+  private stdout = "";
+  private stderr = "";
+  private initializeTimer?: NodeJS.Timeout;
+
+  constructor(
+    spec: AgentLaunchSpec,
+    options: McpProbeOptions,
+    private readonly resolve: (result: AgentLaunchProbe) => void,
+  ) {
+    this.child = spawn(spec.command, spec.args, {
       cwd: options.cwd,
       env: options.env ?? minimalAgentEnvironment(),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const pid = child.pid;
-    const closePromise = new Promise<void>((closeResolve) => child.once("close", () => closeResolve()));
-    let finalizing = false;
-    let stdout = "";
-    let stderr = "";
-    const closedWithin = (milliseconds: number): Promise<boolean> => new Promise((closedResolve) => {
-      const cleanupTimer = setTimeout(() => closedResolve(false), milliseconds);
-      void closePromise.then(() => {
-        clearTimeout(cleanupTimer);
-        closedResolve(true);
-      });
-    });
-    const finish = async (result: AgentLaunchProbe): Promise<void> => {
-      if (finalizing) return;
-      finalizing = true;
-      clearTimeout(initializeTimer);
-      if (!child.stdin.destroyed) child.stdin.end();
-      if (pid === undefined) {
-        resolve(result);
-        return;
-      }
-      if (await closedWithin(100)) {
-        resolve({ ...result, pid });
-        return;
-      }
-      if (child.exitCode === null && child.signalCode === null) child.kill();
-      if (await closedWithin(250)) {
-        resolve({ ...result, pid });
-        return;
-      }
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      if (await closedWithin(750)) {
-        resolve({ ...result, pid });
-        return;
-      }
-      resolve({
-        ok: false,
-        kind: "CLEANUP_FAILURE",
-        detail: `MCP child cleanup failed after ${result.kind}: ${result.detail}`,
-        pid,
-      });
-    };
-    const timeoutMs = options.timeoutMs ?? 5_000;
-    const initializeTimer = setTimeout(() => void finish({
+    this.pid = this.child.pid;
+    this.closePromise = new Promise((closeResolve) => this.child.once("close", () => closeResolve()));
+    this.timeoutMs = options.timeoutMs ?? 5_000;
+  }
+
+  start(): void {
+    this.initializeTimer = setTimeout(() => this.finish({
       ok: false,
       kind: "INITIALIZE_TIMEOUT",
-      detail: `MCP initialize timed out after ${timeoutMs} ms${stderr.trim() ? `: ${stderr.trim()}` : "."}`,
-    }), timeoutMs);
-    child.once("error", (error) => void finish({
+      detail: `MCP initialize timed out after ${this.timeoutMs} ms${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
+    }), this.timeoutMs);
+    this.child.once("error", (error) => this.finish({
       ok: false,
       kind: "SPAWN_FAILURE",
       detail: `MCP spawn failed: ${error.message}`,
     }));
-    child.once("exit", (code, signal) => {
-      if (!finalizing) void finish({
+    this.child.once("exit", (code, signal) => {
+      if (!this.finalizing) this.finish({
         ok: false,
         kind: "EARLY_EXIT",
-        detail: `MCP process exited before initialize completed (code=${String(code)}, signal=${String(signal)})${stderr.trim() ? `: ${stderr.trim()}` : "."}`,
+        detail: `MCP process exited before initialize completed (code=${String(code)}, signal=${String(signal)})${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
       });
     });
-    child.stdin.on("error", (error) => {
-      if (!finalizing) void finish({
+    this.child.stdin.on("error", (error) => {
+      if (!this.finalizing) this.finish({
         ok: false,
         kind: "IO_FAILURE",
         detail: `MCP initialize request could not be written: ${error.message}`,
       });
     });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_096); });
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-      let newline = stdout.indexOf("\n");
-      while (newline !== -1) {
-        const line = stdout.slice(0, newline).replace(/\r$/u, "");
-        stdout = stdout.slice(newline + 1);
-        if (!line.trim()) {
-          newline = stdout.indexOf("\n");
-          continue;
-        }
-        try {
-          const message = JSON.parse(line) as { id?: unknown; result?: { serverInfo?: unknown }; error?: { message?: unknown } };
-          if (message.id === 1) {
-            if (message.result?.serverInfo) {
-              child.stdin.write(`${JSON.stringify({
-                jsonrpc: "2.0",
-                method: "notifications/initialized",
-              })}\n`, (error) => {
-                if (error) {
-                  void finish({
-                    ok: false,
-                    kind: "IO_FAILURE",
-                    detail: `MCP initialized notification could not be written: ${error.message}`,
-                  });
-                } else {
-                  void finish({ ok: true, kind: "SUCCESS", detail: "MCP initialize succeeded and diagnostic child cleanup completed." });
-                }
-              });
-            } else {
-              void finish({
-                ok: false,
-                kind: "PROTOCOL_ERROR",
-                detail: message.error
-                  ? `MCP initialize returned an error: ${String(message.error.message ?? "unknown error")}`
-                  : "MCP initialize response did not contain serverInfo.",
-              });
-            }
-            return;
-          }
-        } catch {
-          void finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout contained a non-JSON protocol line." });
-          return;
-        }
-        newline = stdout.indexOf("\n");
-      }
-      if (stdout.length > 256 * 1_024) {
-        void finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout exceeded the protocol frame limit." });
-      }
-    });
+    this.child.stderr.setEncoding("utf8");
+    this.child.stderr.on("data", (chunk: string) => { this.stderr = `${this.stderr}${chunk}`.slice(-4_096); });
+    this.child.stdout.setEncoding("utf8");
+    this.child.stdout.on("data", (chunk: string) => this.handleStdout(chunk));
     // EOF is an MCP client disconnect, so keep stdin open until initialize has answered.
-    child.stdin.write(`${JSON.stringify({
+    this.child.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
@@ -260,5 +201,82 @@ export function probeMcpLaunch(
         clientInfo: { name: "polarbear-memory-doctor", version: "1" },
       },
     })}\n`);
-  });
+  }
+
+  private handleStdout(chunk: string): void {
+    this.stdout += chunk;
+    let newline = this.stdout.indexOf("\n");
+    while (newline !== -1) {
+      const line = this.stdout.slice(0, newline).replace(/\r$/u, "");
+      this.stdout = this.stdout.slice(newline + 1);
+      if (line.trim() && !this.handleProtocolLine(line)) return;
+      newline = this.stdout.indexOf("\n");
+    }
+    if (this.stdout.length > 256 * 1_024) {
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout exceeded the protocol frame limit." });
+    }
+  }
+
+  private handleProtocolLine(line: string): boolean {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout contained a non-JSON protocol line." });
+      return false;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout contained a non-object protocol message." });
+      return false;
+    }
+    const message = parsed as { id?: unknown; result?: { serverInfo?: unknown }; error?: { message?: unknown } };
+    if (message.id !== 1) return true;
+    if (!message.result?.serverInfo) {
+      this.finish({
+        ok: false,
+        kind: "PROTOCOL_ERROR",
+        detail: message.error
+          ? `MCP initialize returned an error: ${String(message.error.message ?? "unknown error")}`
+          : "MCP initialize response did not contain serverInfo.",
+      });
+      return false;
+    }
+    this.sendInitializedNotification();
+    return false;
+  }
+
+  private sendInitializedNotification(): void {
+    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`, (error) => {
+      this.finish(error
+        ? { ok: false, kind: "IO_FAILURE", detail: `MCP initialized notification could not be written: ${error.message}` }
+        : { ok: true, kind: "SUCCESS", detail: "MCP initialize succeeded and diagnostic child cleanup completed." });
+    });
+  }
+
+  private finish(result: AgentLaunchProbe): void {
+    if (this.finalizing) return;
+    this.finalizing = true;
+    if (this.initializeTimer) clearTimeout(this.initializeTimer);
+    void this.cleanup(result);
+  }
+
+  private async cleanup(result: AgentLaunchProbe): Promise<void> {
+    if (!this.child.stdin.destroyed) this.child.stdin.end();
+    if (this.pid === undefined) return this.resolve(result);
+    if (await closesWithin(this.closePromise, 100)) return this.resolve({ ...result, pid: this.pid });
+    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
+    if (await closesWithin(this.closePromise, 250)) return this.resolve({ ...result, pid: this.pid });
+    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+    if (await closesWithin(this.closePromise, 750)) return this.resolve({ ...result, pid: this.pid });
+    this.resolve({
+      ok: false,
+      kind: "CLEANUP_FAILURE",
+      detail: `MCP child cleanup failed after ${result.kind}: ${result.detail}`,
+      pid: this.pid,
+    });
+  }
+}
+
+export function probeMcpLaunch(spec: AgentLaunchSpec, options: McpProbeOptions): Promise<AgentLaunchProbe> {
+  return new Promise((resolve) => new McpLaunchProbeSession(spec, options, resolve).start());
 }
