@@ -37,6 +37,12 @@ The public Memory API projects a Knowledge aggregate with:
 
 The current type set includes facts, decisions, constraints, architecture, conventions, pitfalls, workarounds, task state, and TODOs. The domain source remains `src/domain/memory.ts`.
 
+## Runtime launch descriptor
+
+`polarbear-memory install` publishes a schema-versioned descriptor at `<Polarbear data root>/runtime/launch.json`. It records the absolute `process.execPath` and package-owned `dist/cli.js` path that performed installation. Desktop and Agent integrations consume this runtime abstraction instead of resolving `polarbear-memory` through an interactive shell or a runtime-manager-specific path.
+
+Desktop validates both paths and starts the Engine with structured arguments equivalent to `runtime executable`, `CLI entrypoint`, `service`, `run`; it does not parse Codex configuration or invoke a shell. An explicit Desktop override remains higher priority for recovery. If either managed path becomes stale, rerunning `polarbear-memory install` republishes the descriptor.
+
 ## Write and retrieval flow
 
 ```text

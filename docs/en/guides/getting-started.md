@@ -29,6 +29,7 @@ This single command:
 - initializes the repository and local SQLite storage when needed;
 - configures Claude Code MCP, Agent rules, and lifecycle hooks;
 - configures project-scoped Codex MCP and server instructions;
+- publishes a local runtime descriptor for Polarbear Desktop using the exact Node runtime and package CLI that executed the installer;
 - preserves unrelated configuration and backs up files before managed changes.
 
 Restart active Agent clients after installation. Use `polarbear-memory install --dry-run` to preview without changing files.
@@ -45,7 +46,7 @@ After a safe checkpoint, close the current session and start a fresh one when th
 polarbear-memory doctor
 ```
 
-For both `Claude MCP` and `Codex MCP`, the config, executable, and handshake lines should report `OK`. If a runtime upgrade makes an absolute path stale, run `polarbear-memory install` again to repair every supported Agent, or `polarbear-memory codex install` to repair Codex only.
+For both `Claude MCP` and `Codex MCP`, the config, executable, and handshake lines should report `OK`. Polarbear Desktop reads the same managed runtime descriptor rather than an interactive shell PATH. If a runtime upgrade makes an absolute path stale, run `polarbear-memory install` again to repair Desktop and every supported Agent, or `polarbear-memory codex install` to repair Codex only.
 
 ## Next
 

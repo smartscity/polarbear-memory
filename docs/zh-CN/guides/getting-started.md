@@ -29,6 +29,7 @@ polarbear-memory install
 - 在需要时初始化仓库和本地 SQLite 存储；
 - 配置 Claude Code MCP、Agent rules 和 lifecycle hooks；
 - 配置项目级 Codex MCP 和 server instructions；
+- 使用执行安装器的确切 Node runtime 与包内 CLI，为 Polarbear Desktop 发布本地 runtime descriptor；
 - 保留无关配置，并在修改托管文件前创建备份。
 
 安装后重启正在运行的 Agent 客户端。可以先运行 `polarbear-memory install --dry-run` 进行无修改预览。
@@ -45,7 +46,7 @@ polarbear-memory install
 polarbear-memory doctor
 ```
 
-安装完成后，`Claude MCP` 和 `Codex MCP` 的 config、executable 与 handshake 都应显示 `OK`。如果 runtime 升级导致绝对路径过期，重新运行 `polarbear-memory install` 可修复所有受支持的 Agent；只修复 Codex 时可运行 `polarbear-memory codex install`。
+安装完成后，`Claude MCP` 和 `Codex MCP` 的 config、executable 与 handshake 都应显示 `OK`。Polarbear Desktop 会读取同一份托管 runtime descriptor，不依赖交互式 shell 的 PATH。如果 runtime 升级导致绝对路径过期，重新运行 `polarbear-memory install` 可修复 Desktop 和所有受支持的 Agent；只修复 Codex 时可运行 `polarbear-memory codex install`。
 
 ## 下一步
 

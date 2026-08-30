@@ -6,6 +6,7 @@ import { discoverGitContext } from "../platform/git.js";
 import { planProject, writeProjectConfig } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { resolveAgentRuntime } from "../platform/agent-launch.js";
+import { publishRuntimeLaunchDescriptor } from "../platform/runtime-descriptor.js";
 
 function status(alreadyInstalled: boolean, dryRun: boolean): string {
   if (alreadyInstalled) return "ALREADY INSTALLED";
@@ -41,10 +42,15 @@ export function runInstallCommand(cwd: string, args: string[]): void {
     }
   }
 
+  const runtimeDescriptorPath = parsed.values["dry-run"]
+    ? undefined
+    : publishRuntimeLaunchDescriptor(runtime);
+
   installClaudeIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
   installCodexIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
 
   console.log(`Project      ${projectInitialized ? "ALREADY INITIALIZED" : parsed.values["dry-run"] ? "WOULD INITIALIZE" : "INITIALIZED"}`);
+  console.log(`Desktop runtime ${parsed.values["dry-run"] ? "WOULD PUBLISH" : `PUBLISHED (${runtimeDescriptorPath})`}`);
   console.log("Agent integrations");
   console.log(`Claude Code  ${status(claudePlan.alreadyInstalled, parsed.values["dry-run"])}`);
   console.log(`Codex        ${status(codexPlan.alreadyInstalled, parsed.values["dry-run"])}`);

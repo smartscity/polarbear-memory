@@ -75,6 +75,13 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(installed.stdout, /Project\s+INITIALIZED/u);
     assert.match(installed.stdout, /Claude Code\s+INSTALLED/u);
     assert.match(installed.stdout, /Codex\s+INSTALLED/u);
+    const runtimeDescriptor = JSON.parse(readFileSync(join(dataDir, "runtime", "launch.json"), "utf8")) as {
+      schemaVersion: number;
+      runtime: { executable: string; cliEntrypoint: string };
+    };
+    assert.equal(runtimeDescriptor.schemaVersion, 1);
+    assert.equal(runtimeDescriptor.runtime.executable, process.execPath);
+    assert.equal(runtimeDescriptor.runtime.cliEntrypoint, cli);
     const codexConfigPath = join(repository, ".codex", "config.toml");
     assert.ok(existsSync(codexConfigPath));
     const generatedCodexConfig = readFileSync(codexConfigPath, "utf8");
