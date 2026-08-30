@@ -6,7 +6,7 @@
 
 - package version and scripts: `package.json`;
 - locked dependencies: `package-lock.json`;
-- Admin contract: `api/admin-v1.json` and `api/admin-v1.types.ts`;
+- contracts: `api/admin-v1.json`, `api/admin-v1.types.ts`, and `api/runtime-launch-v1.json`;
 - SBOM: `docs/SBOM.cdx.json`;
 - release readiness policy: [Release readiness](../planning/release-readiness.md).
 

@@ -28,12 +28,14 @@ const installRoot = join(payload, "usr", "local", "lib", "polarbear-memory");
 const binRoot = join(payload, "usr", "local", "bin");
 const artifacts = join(root, "artifacts");
 mkdirSync(join(installRoot, "runtime"), { recursive: true, mode: 0o755 });
+mkdirSync(join(installRoot, "api"), { recursive: true, mode: 0o755 });
 mkdirSync(join(installRoot, "node_modules", "@modelcontextprotocol"), { recursive: true, mode: 0o755 });
 mkdirSync(binRoot, { recursive: true, mode: 0o755 });
 mkdirSync(artifacts, { recursive: true, mode: 0o755 });
 copyFileSync(process.execPath, join(installRoot, "runtime", "node"));
 chmodSync(join(installRoot, "runtime", "node"), 0o755);
 cpSync(join(root, "dist"), join(installRoot, "dist"), { recursive: true });
+copyFileSync(join(root, "api", "runtime-launch-v1.json"), join(installRoot, "api", "runtime-launch-v1.json"));
 for (const dependency of ["zod", "@modelcontextprotocol/core", "@modelcontextprotocol/server"]) {
   cpSync(join(root, "node_modules", dependency), join(installRoot, "node_modules", dependency), { recursive: true });
 }

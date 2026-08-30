@@ -6,7 +6,7 @@
 
 - package version/scripts：`package.json`；
 - locked dependency：`package-lock.json`；
-- Admin contract：`api/admin-v1.json`、`api/admin-v1.types.ts`；
+- contracts：`api/admin-v1.json`、`api/admin-v1.types.ts`、`api/runtime-launch-v1.json`；
 - SBOM：`docs/SBOM.cdx.json`；
 - 发布判定：[发布就绪状态](../planning/release-readiness.md)。
 
