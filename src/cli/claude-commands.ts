@@ -11,9 +11,12 @@ export function runClaudeCommand(cwd: string, args: string[]): void {
   if (action === "install") {
     const parsed = parseArgs({
       args: rest,
-      options: { "dry-run": { type: "boolean", default: false } },
+      options: { "dry-run": { type: "boolean", default: false }, command: { type: "string" } },
       strict: true,
     });
+    if (parsed.values.command) {
+      console.error("Warning: --command is deprecated and ignored; Agent launch paths are derived from the active runtime.");
+    }
     const result = installClaudeIntegration(project, {
       dryRun: parsed.values["dry-run"],
       runtime: resolveAgentRuntime(),

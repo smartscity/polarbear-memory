@@ -10,7 +10,7 @@ polarbear-memory doctor
 polarbear-memory doctor --export
 ```
 
-Diagnostics export 不包含 Memory 正文、仓库路径、token 和原始 session ID。
+Diagnostics export 不包含 Memory 正文、仓库路径、token 和原始 session ID。当已配置的 Agent integration 过期、无法启动、发生冲突或 MCP handshake 失败时，doctor 返回非零退出状态；从未配置的可选 Agent 会显示状态，但不会导致命令失败。
 
 ## Lifecycle maintenance
 
@@ -60,6 +60,7 @@ polarbear-memory uninstall --keep-data
 ## 常见错误
 
 - `Project is not initialized`：在 Git 仓库中运行 `polarbear-memory install`，同时初始化项目并接入受支持的 Agent。
+- Agent MCP runtime 过期：运行 `polarbear-memory install` 修复全部托管集成，或使用对应 Agent 的安装命令只修复该客户端。
 - Provider unavailable：安装官方 CLI 并确认在 `PATH`。
 - Rotation requires checkpoint：fresh session 前保存当前结构化状态。
 - Database busy：关闭仍存活的长连接，不要手工删除活动 lease。

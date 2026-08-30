@@ -15,12 +15,15 @@ function status(alreadyInstalled: boolean, dryRun: boolean): string {
 export function runInstallCommand(cwd: string, args: string[]): void {
   const parsed = parseArgs({
     args,
-    options: { "dry-run": { type: "boolean", default: false } },
+    options: { "dry-run": { type: "boolean", default: false }, command: { type: "string" } },
     strict: true,
   });
   const project = planProject(discoverGitContext(cwd));
   const projectInitialized = existsSync(project.configPath);
   const runtime = resolveAgentRuntime();
+  if (parsed.values.command) {
+    console.error("Warning: --command is deprecated and ignored; Agent launch paths are derived from the active runtime.");
+  }
 
   const claudePlan = planClaudeIntegration(project, runtime);
   const codexPlan = planCodexIntegration(project, runtime);
@@ -46,7 +49,9 @@ export function runInstallCommand(cwd: string, args: string[]): void {
   console.log(`Claude Code  ${status(claudePlan.alreadyInstalled, parsed.values["dry-run"])}`);
   console.log(`Codex        ${status(codexPlan.alreadyInstalled, parsed.values["dry-run"])}`);
   if (claudePlan.legacyConfiguration || codexPlan.legacyConfiguration) {
-    console.log("Legacy Agent configuration detected; runtime launch commands were updated.");
+    console.log(parsed.values["dry-run"]
+      ? "Legacy Agent configuration detected; runtime launch commands would be updated."
+      : "Legacy Agent configuration detected; runtime launch commands were updated.");
   }
   if (parsed.values["dry-run"]) {
     console.log("\nDry run only; no files were changed.");

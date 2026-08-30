@@ -19,6 +19,10 @@ export interface AgentLaunchProbe {
   detail: string;
 }
 
+export function sanitizeAgentDiagnostic(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 1_024);
+}
+
 export function validateAgentLaunchSpec(spec: AgentLaunchSpec): AgentLaunchProbe {
   try {
     assertLaunchFile(spec.command, "Configured runtime executable", true);

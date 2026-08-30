@@ -14,7 +14,8 @@ import { loadProject } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { VERSION } from "../version.js";
 import {
-  minimalAgentEnvironment, probeMcpLaunch, validateAgentLaunchSpec, type AgentLaunchSpec,
+  minimalAgentEnvironment, probeMcpLaunch, sanitizeAgentDiagnostic, validateAgentLaunchSpec,
+  type AgentLaunchSpec,
 } from "../platform/agent-launch.js";
 
 function parseNumber(value: string | undefined, fallback: number, label: string): number {
@@ -299,29 +300,35 @@ async function reportAgentIntegration(
   configStatus: "OK" | "STALE" | "CONFLICT" | "NOT INSTALLED",
   spec: AgentLaunchSpec | undefined,
   projectRoot: string,
-): Promise<{ configured: boolean; executable: boolean; handshake: boolean }> {
+): Promise<{ configured: boolean; executable: boolean; handshake: boolean; healthy: boolean }> {
   const prefix = label.padEnd(10);
   console.log(`${prefix} config       ${configStatus}`);
   if (!spec) {
     console.log(`${prefix} executable   NOT CONFIGURED`);
     console.log(`${prefix} handshake    NOT RUN`);
-    return { configured: false, executable: false, handshake: false };
+    return {
+      configured: false, executable: false, handshake: false,
+      healthy: configStatus === "NOT INSTALLED",
+    };
   }
   const validation = validateAgentLaunchSpec(spec);
   console.log(`${prefix} executable   ${validation.ok ? "OK" : "FAILED"}`);
   if (!validation.ok) {
-    console.log(`  ${validation.detail}`);
+    console.log(`  ${sanitizeAgentDiagnostic(validation.detail)}`);
     console.log("  Run: polarbear-memory install");
     console.log(`${prefix} handshake    NOT RUN`);
-    return { configured: configStatus === "OK", executable: false, handshake: false };
+    return { configured: configStatus === "OK", executable: false, handshake: false, healthy: false };
   }
   const probe = await probeMcpLaunch(spec, { cwd: projectRoot, env: minimalAgentEnvironment() });
   console.log(`${prefix} handshake    ${probe.ok ? "OK" : "FAILED"}`);
   if (!probe.ok) {
-    console.log(`  ${probe.detail}`);
+    console.log(`  ${sanitizeAgentDiagnostic(probe.detail)}`);
     console.log("  Run: polarbear-memory install");
   }
-  return { configured: configStatus === "OK", executable: true, handshake: probe.ok };
+  return {
+    configured: configStatus === "OK", executable: true, handshake: probe.ok,
+    healthy: configStatus === "OK" && probe.ok,
+  };
 }
 
 export async function doctor(cwd: string, args: string[]): Promise<void> {
@@ -347,6 +354,7 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
     : codexIntegration.conflict ? "CONFLICT" : codexSpec ? "STALE" : "NOT INSTALLED";
   const claudeDiagnostics = await reportAgentIntegration("Claude MCP", claudeStatus, claudeSpec, project.root);
   const codexDiagnostics = await reportAgentIntegration("Codex MCP", codexStatus, codexSpec, project.root);
+  if (!claudeDiagnostics.healthy || !codexDiagnostics.healthy) process.exitCode = 1;
   console.log("Network      disabled by design");
   if (parsed.values.export) {
     const diagnosticsDirectory = join(project.dataDir, "diagnostics");

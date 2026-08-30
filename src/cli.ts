@@ -56,7 +56,7 @@ Usage:
   polarbear-memory doctor [--export]
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
   polarbear-memory service run
-  polarbear-memory claude install [--dry-run]
+  polarbear-memory claude install [--dry-run] [--command DEPRECATED]
   polarbear-memory claude restore
   polarbear-memory codex install [--dry-run]
   polarbear-memory hook ingest --event SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd

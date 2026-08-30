@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
@@ -23,7 +23,14 @@ test("CLI stderr policy tolerates only the known Node 24 SQLite warning", () => 
   assert.throws(() => assertNoUnexpectedStderr("unexpected application error\n"));
 });
 
-function run(command: string, args: string[], cwd: string, dataDir?: string, input?: string) {
+function runExpectingStatus(
+  command: string,
+  args: string[],
+  cwd: string,
+  expectedStatus: number,
+  dataDir?: string,
+  input?: string,
+) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -38,8 +45,16 @@ function run(command: string, args: string[], cwd: string, dataDir?: string, inp
     result.error ? `spawn error: ${result.error.message}` : "",
     result.stderr,
   ].filter(Boolean).join("\n");
-  assert.equal(result.status, 0, failure);
+  assert.equal(result.status, expectedStatus, failure);
   return result;
+}
+
+function run(command: string, args: string[], cwd: string, dataDir?: string, input?: string) {
+  return runExpectingStatus(command, args, cwd, 0, dataDir, input);
+}
+
+function runFailure(command: string, args: string[], cwd: string, dataDir?: string) {
+  return runExpectingStatus(command, args, cwd, 1, dataDir);
 }
 
 test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () => {
@@ -49,7 +64,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
   const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
   const denyNetwork = fileURLToPath(new URL("./test/deny-network.js", import.meta.url));
   const fixture = resolve("fixtures/resume-basic/fixture.json");
-  const offline = (args: string[]) => ["--import", denyNetwork, cli, ...args];
+  const offline = (args: string[]) => ["--import", pathToFileURL(denyNetwork).href, cli, ...args];
   try {
     run("git", ["init", "-q", repository], temporary);
     const dryRun = run(process.execPath, offline(["install", "--dry-run"]), repository, dataDir);
@@ -65,6 +80,13 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const generatedCodexConfig = readFileSync(codexConfigPath, "utf8");
     assert.match(generatedCodexConfig, new RegExp(`command = ${JSON.stringify(process.execPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
     assert.doesNotMatch(generatedCodexConfig, /command = "polarbear-memory"/u);
+    const deprecatedCommand = run(
+      process.execPath,
+      offline(["claude", "install", "--dry-run", "--command", "polarbear-memory"]),
+      repository,
+      dataDir,
+    );
+    assert.match(deprecatedCommand.stderr, /--command is deprecated and ignored/u);
     const maintenancePreview = run(process.execPath, offline(["maintain", "--dry-run"]), repository, dataDir);
     assert.match(maintenancePreview.stdout, /"policyVersion": "mvp3-v1"/);
     const recorded = run(process.execPath, [
@@ -127,7 +149,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
       `command = ${JSON.stringify(process.execPath)}`,
       'command = "/nonexistent/polarbear-runtime/node"',
     ));
-    const staleDoctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
+    const staleDoctor = runFailure(process.execPath, offline(["doctor"]), repository, dataDir);
     assert.match(staleDoctor.stdout, /Codex MCP\s+config\s+STALE/u);
     assert.match(staleDoctor.stdout, /Codex MCP\s+executable\s+FAILED/u);
     assert.match(staleDoctor.stdout, /polarbear-memory install/u);

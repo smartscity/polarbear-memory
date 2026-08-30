@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ProjectBinding } from "../../platform/project.js";
 import type { AgentRuntime } from "../../platform/agent-launch.js";
-import { installCodexIntegration, planCodexIntegration, uninstallCodexIntegration } from "./integration.js";
+import {
+  installCodexIntegration, planCodexIntegration, readCodexLaunchSpec, uninstallCodexIntegration,
+} from "./integration.js";
 
 function fixture(): { temporary: string; project: ProjectBinding } {
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-codex-"));
@@ -47,7 +49,7 @@ test("Codex integration dry-run is non-mutating and install preserves other conf
     assert.match(config, /model = "gpt-test"/u);
     assert.match(config, /\[mcp_servers\.existing\]/u);
     assert.match(config, /\[mcp_servers\.polarbear-memory\]/u);
-    assert.match(config, new RegExp(project.root.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.equal(readCodexLaunchSpec(project)?.args.at(-1), project.root);
     assert.equal(planCodexIntegration(project).alreadyInstalled, true);
     installCodexIntegration(project, { dryRun: false });
     assert.equal(readFileSync(configPath, "utf8"), config);

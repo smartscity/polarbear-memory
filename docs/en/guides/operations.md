@@ -10,7 +10,7 @@ polarbear-memory doctor
 polarbear-memory doctor --export
 ```
 
-Diagnostics exports exclude Memory content, repository paths, tokens, and raw session identifiers.
+Diagnostics exports exclude Memory content, repository paths, tokens, and raw session identifiers. Doctor returns a non-zero exit status when a configured Agent integration is stale, unlaunchable, conflicting, or fails the MCP handshake; an optional Agent that was never configured is reported but does not fail the command.
 
 ## Maintenance
 
@@ -64,6 +64,7 @@ Permanent deletion requires the explicit project confirmation shown by the CLI. 
 ## Common failures
 
 - **Project is not initialized:** run `polarbear-memory install` in the Git repository to initialize it and connect supported Agents.
+- **Agent MCP runtime is stale:** run `polarbear-memory install` to repair every managed integration, or the Agent-specific installer to repair only that client.
 - **Provider runtime unavailable:** install the official CLI and confirm it is on `PATH`.
 - **Rotation requires a checkpoint:** save current structured state before requesting a fresh session.
 - **Database busy:** close long-running clients; do not delete lock or lease files manually while a process is alive.

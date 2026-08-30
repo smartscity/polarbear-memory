@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  buildPolarbearLaunchSpec, minimalAgentEnvironment, resolveAgentRuntime, serializeShellCommand,
+  buildPolarbearLaunchSpec, minimalAgentEnvironment, resolveAgentRuntime, sanitizeAgentDiagnostic,
+  serializeShellCommand,
 } from "./agent-launch.js";
 
 test("runtime resolution uses the current process and package-owned CLI artifact", () => {
@@ -38,9 +39,13 @@ test("hook command serialization quotes POSIX and Windows paths without shell lo
 });
 
 test("minimal Agent environment does not inherit an interactive PATH", () => {
-  const environment = minimalAgentEnvironment({ PATH: "/interactive/runtime/bin", HOME: "/home/test" });
-  assert.equal(environment.PATH, process.platform === "win32" ? "" : "/usr/bin:/bin");
-  assert.equal(environment.HOME, "/home/test");
+  const posix = minimalAgentEnvironment(
+    { PATH: "/interactive/runtime/bin", HOME: "/home/test" },
+    "linux",
+    "/interactive/runtime/bin/node",
+  );
+  assert.equal(posix.PATH, "/usr/bin:/bin");
+  assert.equal(posix.HOME, "/home/test");
 
   const windows = minimalAgentEnvironment(
     { PATH: "C:\\Runtime\\bin;C:\\Git\\cmd", SystemRoot: "C:\\Windows" },
@@ -49,4 +54,12 @@ test("minimal Agent environment does not inherit an interactive PATH", () => {
   );
   assert.equal(windows.PATH, "C:\\Git\\cmd");
   assert.equal(windows.SystemRoot, "C:\\Windows");
+});
+
+test("Agent diagnostics are bounded to inert single-line terminal text", () => {
+  const noisy = `failed\n\u001b[31mred\u001b[0m\r${"x".repeat(2_000)}`;
+  const sanitized = sanitizeAgentDiagnostic(noisy);
+  assert.equal(sanitized.includes("\n"), false);
+  assert.equal(sanitized.includes("\u001b"), false);
+  assert.equal(sanitized.length, 1_024);
 });
