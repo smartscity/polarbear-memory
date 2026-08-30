@@ -30,7 +30,7 @@
 - 新建生产类建议不超过 250 行，400 行为硬上限；超过时必须先按职责拆分。
 - 新建函数建议不超过 40 行；超过 80 行必须拆出有业务名称的步骤。
 - 一个类的公开方法应属于同一个能力域。超过 12 个公开方法时，优先拆 Facade + 多个 Service。
-- `SqliteMemoryStore` 是兼容 Facade：不得超过 400 行，不得新增业务变化轴；业务 SQL 应位于对应 Service/Repository。目标见 `docs/TRD_UML_DESIGN.md`。
+- `SqliteMemoryStore` 是兼容 Facade：不得超过 400 行，不得新增业务变化轴；业务 SQL 应位于对应 Service/Repository。职责映射见 `docs/en/implementation/repository-map.md`。
 - Schema SQL 可按完整迁移单元保留在单文件，不以普通类行数衡量，但必须有版本、校验和与迁移测试。
 
 ## 4. 重复代码规则
@@ -83,14 +83,15 @@ npm run package:check
 - 修复 bug 时先增加能复现问题的回归测试。
 - 不得通过延长超时掩盖死锁、句柄泄漏或不确定性。
 
-## 8. 文档与工作区纪律
+## 8. Documentation and workspace discipline
 
-- Language policy: all newly written or substantially revised documentation, architecture text, code comments, TSDoc/JSDoc, test descriptions, commit messages, and public contract descriptions must be written in English. Localized end-user resource files are the only exception; do not remove required translations.
-- 架构变化必须同步 `docs/TRD.md` 与 `docs/TRD_UML_DESIGN.md`。
-- Mermaid 图必须由文本本地渲染或由支持 Mermaid 的客户端展示，禁止远程渲染服务。
-- 保留用户已有的未提交修改；不得 reset、checkout 或覆盖无关文件。
-- 禁止提交构建产物、真实数据库、备份、日志、secret 和 `.business` 私有材料到 npm 包。
-- 提交前检查 `git diff`、`npm pack --dry-run` 和发布白名单。
+- All newly written or substantially revised engineering documentation, architecture text, code comments, TSDoc/JSDoc, test descriptions, commit messages, and public contract descriptions must be written in English. Maintained localized documents under `docs/zh-CN/` are the exception.
+- Follow `docs/README.md`: update the single English document that owns the changed behavior, plus its Chinese counterpart when the behavior is user-visible. Do not update unrelated overviews or indexes.
+- Canonical protocol/schema details remain in code and versioned contracts. Narrative documents explain intent, boundaries, and workflows rather than copying complete schemas.
+- Mermaid diagrams must render locally from repository text or in a Mermaid-capable client. Remote rendering services are prohibited.
+- Preserve existing user changes. Do not reset, checkout, or overwrite unrelated files.
+- Do not publish build output, real databases, backups, logs, secrets, or private `.business` material.
+- Before commit, inspect `git diff`, `npm pack --dry-run`, and the publication allowlist.
 
 ## 9. Code Review 检查表
 

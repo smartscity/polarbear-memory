@@ -2,7 +2,7 @@
 
 ## Supported version
 
-Security fixes are provided for the latest `0.1.x` release candidate. Until the GA blockers in `docs/GA_READINESS.md` are closed, builds must be described as release candidates rather than production-certified GA artifacts.
+Security fixes are provided for the latest supported release candidate. Until the applicable blockers in [release readiness](docs/en/planning/release-readiness.md) are closed, builds must not be described as production-certified GA artifacts.
 
 ## Reporting
 
