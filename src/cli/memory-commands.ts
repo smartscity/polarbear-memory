@@ -322,7 +322,7 @@ async function reportAgentIntegration(
   const probe = await probeMcpLaunch(spec, { cwd: projectRoot, env: minimalAgentEnvironment() });
   console.log(`${prefix} handshake    ${probe.ok ? "OK" : "FAILED"}`);
   if (!probe.ok) {
-    console.log(`  ${sanitizeAgentDiagnostic(probe.detail)}`);
+    console.log(`  ${probe.kind}: ${sanitizeAgentDiagnostic(probe.detail)}`);
     console.log("  Run: polarbear-memory install");
   }
   return {

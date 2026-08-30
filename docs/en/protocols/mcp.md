@@ -46,7 +46,7 @@ Other MCP-compatible clients can configure the same stdio server manually:
 
 The runtime and CLI paths must belong to the same working Polarbear installation. The supported installers derive both paths from the running Polarbear process; they do not search shell profiles, runtime managers, or `PATH`. The client launches this process. A user does not normally run `polarbear-memory mcp --stdio` in a terminal or invoke the MCP tools manually.
 
-`polarbear-memory doctor` checks configuration freshness, runtime and CLI existence, and an MCP initialization handshake using a minimal environment. A stale or missing runtime is a failure even when the configuration entry exists.
+`polarbear-memory doctor` checks configuration freshness, runtime and CLI existence, and an MCP initialization handshake using a minimal environment. The probe keeps stdin open until it receives the initialize response, then terminates the disposable child and waits for its stdio handles to close. This avoids racing the response against an EOF-triggered server shutdown and prevents orphan probes. Failures identify spawn, early exit, initialize timeout, protocol, I/O, or cleanup stages. A stale or missing runtime is a failure even when the configuration entry exists.
 
 ## Default tool groups
 

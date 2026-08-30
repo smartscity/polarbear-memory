@@ -46,7 +46,7 @@ polarbear-memory install
 
 Runtime 与 CLI 路径必须属于同一个可工作的 Polarbear 安装。受支持的安装器从当前 Polarbear 进程取得这两个路径，不搜索 shell profile、runtime manager 或 `PATH`。该进程由客户端启动。正常使用时，用户不需要在终端手动运行 `polarbear-memory mcp --stdio`，也不需要手动调用 MCP 工具。
 
-`polarbear-memory doctor` 会在最小环境中检查配置是否过期、runtime 与 CLI 是否存在，并执行 MCP initialize handshake。即使配置条目存在，runtime 路径失效也会报告失败。
+`polarbear-memory doctor` 会在最小环境中检查配置是否过期、runtime 与 CLI 是否存在，并执行 MCP initialize handshake。探针在收到 initialize 响应前保持 stdin 打开，随后终止一次性子进程并等待其 stdio handle 关闭。这样可避免响应与 EOF 触发的 server shutdown 竞速，并防止遗留孤儿探针。失败信息会区分 spawn、提前退出、initialize 超时、协议、I/O 和清理阶段。即使配置条目存在，runtime 路径失效也会报告失败。
 
 ## 默认工具分组
 
