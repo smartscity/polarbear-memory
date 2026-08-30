@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -191,7 +191,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
 
     run(process.execPath, offline(["claude", "restore"]), repository, dataDir);
     const restorePreview = run(process.execPath, offline(["backup", "restore", backupPath]), repository, dataDir);
-    const backupName = backupPath.split("/").at(-1) as string;
+    const backupName = basename(backupPath);
     assert.match(restorePreview.stdout, new RegExp(`--confirm ${backupName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
     assert.match(run(process.execPath, offline(["backup", "restore", backupPath, "--confirm", backupName]), repository, dataDir).stdout, /Previous database preserved/);
     run(process.execPath, offline(["install"]), repository, dataDir);
