@@ -39,9 +39,9 @@ The current type set includes facts, decisions, constraints, architecture, conve
 
 ## Runtime launch descriptor
 
-`polarbear-memory install` publishes a schema-versioned descriptor at `<Polarbear data root>/runtime/launch.json`. It records the absolute `process.execPath` and package-owned `dist/cli.js` path that performed installation. Desktop and Agent integrations consume this runtime abstraction instead of resolving `polarbear-memory` through an interactive shell or a runtime-manager-specific path.
+`polarbear-memory install` ensures a schema-versioned descriptor exists at `<Polarbear data root>/runtime/launch.json`. It records the absolute `process.execPath` and package-owned `dist/cli.js` path that performed installation. Descriptor repair is independent of project initialization and Agent configuration changes: a missing descriptor is created, a stale descriptor is replaced, and a current descriptor is left untouched.
 
-Desktop validates both paths and starts the Engine with structured arguments equivalent to `runtime executable`, `CLI entrypoint`, `service`, `run`; it does not parse Codex configuration or invoke a shell. An explicit Desktop override remains higher priority for recovery. If either managed path becomes stale, rerunning `polarbear-memory install` republishes the descriptor.
+The canonical path, schema version, and runtime fields are defined by `api/runtime-launch-v1.json`; Desktop consumes a vendored copy of that contract. Desktop validates both paths and starts the Engine with structured arguments equivalent to `runtime executable`, `CLI entrypoint`, `service`, `run`; it does not parse Codex configuration or invoke a shell. An explicit Desktop override remains higher priority for recovery.
 
 ## Write and retrieval flow
 

@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "api/admin-v1.json",
+    "api/runtime-launch-v1.json",
     "README.md",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -94,6 +94,35 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(upgradedCodexConfig, /model = "keep-after-upgrade"/u);
     assert.match(upgradedCodexConfig, /# BEGIN POLARBEAR MEMORY MANAGED MCP/u);
     assert.doesNotMatch(upgradedCodexConfig, /command = "polarbear-memory"/u);
+    const claudeConfigPath = join(repository, ".mcp.json");
+    const upgradedClaudeConfig = readFileSync(claudeConfigPath, "utf8");
+    const runtimeDescriptorPath = join(dataDir, "runtime", "launch.json");
+
+    rmSync(runtimeDescriptorPath);
+    const missingDescriptorDoctor = runFailure(process.execPath, offline(["doctor"]), repository, dataDir);
+    assert.match(missingDescriptorDoctor.stdout, /Runtime descriptor\s+FAILED/u);
+    assert.match(missingDescriptorDoctor.stdout, /Runtime executable\s+FAILED/u);
+    assert.match(missingDescriptorDoctor.stdout, /CLI entrypoint\s+FAILED/u);
+    const repairedMissing = run(process.execPath, offline(["install"]), repository, dataDir);
+    assert.match(repairedMissing.stdout, /Runtime descriptor CREATED/u);
+    assert.equal(readFileSync(codexConfigPath, "utf8"), upgradedCodexConfig);
+    assert.equal(readFileSync(claudeConfigPath, "utf8"), upgradedClaudeConfig);
+
+    writeFileSync(runtimeDescriptorPath, `${JSON.stringify({
+      schemaVersion: 1,
+      runtime: {
+        executable: join(temporary, "stale", "node"),
+        cliEntrypoint: join(temporary, "stale", "cli.js"),
+      },
+    })}\n`, "utf8");
+    const repairedStale = run(process.execPath, offline(["install"]), repository, dataDir);
+    assert.match(repairedStale.stdout, /Runtime descriptor REPAIRED/u);
+    assert.equal(readFileSync(codexConfigPath, "utf8"), upgradedCodexConfig);
+    assert.equal(readFileSync(claudeConfigPath, "utf8"), upgradedClaudeConfig);
+    const preservedDescriptorTime = new Date("2020-01-02T03:04:05.000Z");
+    utimesSync(runtimeDescriptorPath, preservedDescriptorTime, preservedDescriptorTime);
+    assert.match(run(process.execPath, offline(["install"]), repository, dataDir).stdout, /Runtime descriptor CURRENT/u);
+    assert.equal(statSync(runtimeDescriptorPath).mtimeMs, preservedDescriptorTime.getTime());
     const deprecatedCommand = run(
       process.execPath,
       offline(["claude", "install", "--dry-run", "--command", "polarbear-memory"]),

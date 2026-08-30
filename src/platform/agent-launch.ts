@@ -27,17 +27,17 @@ export function sanitizeAgentDiagnostic(value: string): string {
 
 export function validateAgentLaunchSpec(spec: AgentLaunchSpec): AgentLaunchProbe {
   try {
-    assertLaunchFile(spec.command, "Configured runtime executable", true);
+    assertAgentLaunchFile(spec.command, "Configured runtime executable", true);
     const cliEntrypoint = spec.args[0];
     if (!cliEntrypoint) throw new Error("Configured launch arguments do not contain a CLI entrypoint.");
-    assertLaunchFile(cliEntrypoint, "Configured Polarbear Memory CLI entrypoint", false);
+    assertAgentLaunchFile(cliEntrypoint, "Configured Polarbear Memory CLI entrypoint", false);
     return { ok: true, kind: "SUCCESS", detail: "Runtime executable and CLI entrypoint are launchable." };
   } catch (error) {
     return { ok: false, kind: "VALIDATION_FAILURE", detail: error instanceof Error ? error.message : String(error) };
   }
 }
 
-function assertLaunchFile(path: string, label: string, executable: boolean): void {
+export function assertAgentLaunchFile(path: string, label: string, executable: boolean): void {
   if (!isAbsolute(path)) throw new Error(`${label} must be an absolute path: ${path}`);
   if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`${label} does not exist: ${path}`);
   if (executable) {
@@ -55,8 +55,8 @@ export function resolveAgentRuntime(): AgentRuntime {
     executable: process.execPath,
     cliEntrypoint: fileURLToPath(new URL("../cli.js", import.meta.url)),
   };
-  assertLaunchFile(runtime.executable, "Current Node runtime", true);
-  assertLaunchFile(runtime.cliEntrypoint, "Polarbear Memory CLI entrypoint", false);
+  assertAgentLaunchFile(runtime.executable, "Current Node runtime", true);
+  assertAgentLaunchFile(runtime.cliEntrypoint, "Polarbear Memory CLI entrypoint", false);
   return runtime;
 }
 

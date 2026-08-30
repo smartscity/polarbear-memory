@@ -6,7 +6,7 @@ import { discoverGitContext } from "../platform/git.js";
 import { planProject, writeProjectConfig } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { resolveAgentRuntime } from "../platform/agent-launch.js";
-import { publishRuntimeLaunchDescriptor } from "../platform/runtime-descriptor.js";
+import { ensureRuntimeLaunchDescriptor, planRuntimeLaunchDescriptor } from "../platform/runtime-descriptor.js";
 
 function status(alreadyInstalled: boolean, dryRun: boolean): string {
   if (alreadyInstalled) return "ALREADY INSTALLED";
@@ -26,6 +26,10 @@ export function runInstallCommand(cwd: string, args: string[]): void {
     console.error("Warning: --command is deprecated and ignored; Agent launch paths are derived from the active runtime.");
   }
 
+  const runtimeDescriptor = parsed.values["dry-run"]
+    ? planRuntimeLaunchDescriptor(runtime)
+    : ensureRuntimeLaunchDescriptor(runtime);
+
   const claudePlan = planClaudeIntegration(project, runtime);
   const codexPlan = planCodexIntegration(project, runtime);
   if (codexPlan.conflict) {
@@ -42,15 +46,14 @@ export function runInstallCommand(cwd: string, args: string[]): void {
     }
   }
 
-  const runtimeDescriptorPath = parsed.values["dry-run"]
-    ? undefined
-    : publishRuntimeLaunchDescriptor(runtime);
-
   installClaudeIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
   installCodexIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
 
   console.log(`Project      ${projectInitialized ? "ALREADY INITIALIZED" : parsed.values["dry-run"] ? "WOULD INITIALIZE" : "INITIALIZED"}`);
-  console.log(`Desktop runtime ${parsed.values["dry-run"] ? "WOULD PUBLISH" : `PUBLISHED (${runtimeDescriptorPath})`}`);
+  const descriptorAction = parsed.values["dry-run"] && runtimeDescriptor.action !== "CURRENT"
+    ? `WOULD ${runtimeDescriptor.action}`
+    : runtimeDescriptor.action;
+  console.log(`Runtime descriptor ${descriptorAction} (${runtimeDescriptor.path})`);
   console.log("Agent integrations");
   console.log(`Claude Code  ${status(claudePlan.alreadyInstalled, parsed.values["dry-run"])}`);
   console.log(`Codex        ${status(codexPlan.alreadyInstalled, parsed.values["dry-run"])}`);

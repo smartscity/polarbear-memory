@@ -29,9 +29,9 @@ Project
 
 ## Runtime launch descriptor
 
-`polarbear-memory install` 会在 `<Polarbear data root>/runtime/launch.json` 发布带 schema version 的 descriptor，其中记录执行安装器的绝对 `process.execPath` 与包内 `dist/cli.js` 路径。Desktop 和 Agent integration 使用这个 runtime abstraction，不通过交互式 shell 或 runtime manager 专属路径解析 `polarbear-memory`。
+`polarbear-memory install` 会确保 `<Polarbear data root>/runtime/launch.json` 存在带 schema version 的 descriptor，其中记录执行安装器的绝对 `process.execPath` 与包内 `dist/cli.js` 路径。Descriptor 修复不依赖项目初始化或 Agent 配置是否发生变化：缺失时创建，过期时替换，当前版本则保持文件不变。
 
-Desktop 会校验两个路径，并以结构化参数启动 Engine：`runtime executable`、`CLI entrypoint`、`service`、`run`；不会解析 Codex 配置，也不会启动 shell。显式 Desktop override 仍然优先，便于恢复。任一托管路径过期后，重新执行 `polarbear-memory install` 即可重新发布 descriptor。
+Canonical path、schema version 和 runtime fields 由 `api/runtime-launch-v1.json` 定义；Desktop 使用该 contract 的 vendored copy。Desktop 会校验两个路径，并以结构化参数启动 Engine：`runtime executable`、`CLI entrypoint`、`service`、`run`；不会解析 Codex 配置，也不会启动 shell。显式 Desktop override 仍然优先，便于恢复。
 
 ## 写入与检索
 

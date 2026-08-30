@@ -14,9 +14,10 @@ import { loadProject } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { VERSION } from "../version.js";
 import {
-  minimalAgentEnvironment, probeMcpLaunch, sanitizeAgentDiagnostic, validateAgentLaunchSpec,
+  minimalAgentEnvironment, probeMcpLaunch, resolveAgentRuntime, sanitizeAgentDiagnostic, validateAgentLaunchSpec,
   type AgentLaunchSpec,
 } from "../platform/agent-launch.js";
+import { diagnoseRuntimeLaunchDescriptor } from "../platform/runtime-descriptor.js";
 
 function parseNumber(value: string | undefined, fallback: number, label: string): number {
   if (value === undefined) return fallback;
@@ -344,6 +345,16 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
     console.log("FTS5         OK");
   });
   console.log("Git          OK");
+  const runtimeDescriptor = diagnoseRuntimeLaunchDescriptor(resolveAgentRuntime());
+  for (const [label, result] of [
+    ["Runtime descriptor", runtimeDescriptor.descriptor],
+    ["Runtime executable", runtimeDescriptor.executable],
+    ["CLI entrypoint", runtimeDescriptor.cliEntrypoint],
+  ] as const) {
+    console.log(`${label.padEnd(24)} ${result.ok ? "OK" : "FAILED"}`);
+    if (!result.ok) console.log(`  ${sanitizeAgentDiagnostic(result.detail)}`);
+  }
+  if (!runtimeDescriptor.current) console.log("  Run: polarbear-memory install");
   const integration = planClaudeIntegration(project);
   const codexIntegration = planCodexIntegration(project);
   const claudeSpec = readClaudeLaunchSpec(project);
@@ -354,7 +365,7 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
     : codexIntegration.conflict ? "CONFLICT" : codexSpec ? "STALE" : "NOT INSTALLED";
   const claudeDiagnostics = await reportAgentIntegration("Claude MCP", claudeStatus, claudeSpec, project.root);
   const codexDiagnostics = await reportAgentIntegration("Codex MCP", codexStatus, codexSpec, project.root);
-  if (!claudeDiagnostics.healthy || !codexDiagnostics.healthy) process.exitCode = 1;
+  if (!runtimeDescriptor.current || !claudeDiagnostics.healthy || !codexDiagnostics.healthy) process.exitCode = 1;
   console.log("Network      disabled by design");
   if (parsed.values.export) {
     const diagnosticsDirectory = join(project.dataDir, "diagnostics");
@@ -379,6 +390,12 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
         codexExecutable: codexDiagnostics.executable,
         codexHandshake: codexDiagnostics.handshake,
         codexConflict: codexIntegration.conflict,
+      },
+      runtimeDescriptor: {
+        current: runtimeDescriptor.current,
+        descriptor: runtimeDescriptor.descriptor.ok,
+        executable: runtimeDescriptor.executable.ok,
+        cliEntrypoint: runtimeDescriptor.cliEntrypoint.ok,
       },
       networkPolicy: "disabled",
     };

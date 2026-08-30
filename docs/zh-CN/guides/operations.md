@@ -10,7 +10,7 @@ polarbear-memory doctor
 polarbear-memory doctor --export
 ```
 
-Diagnostics export 不包含 Memory 正文、仓库路径、token 和原始 session ID。当已配置的 Agent integration 过期、无法启动、发生冲突或 MCP handshake 失败时，doctor 返回非零退出状态；从未配置的可选 Agent 会显示状态，但不会导致命令失败。
+Diagnostics export 不包含 Memory 正文、仓库路径、token 和原始 session ID。Doctor 会分别报告 `Runtime descriptor`、`Runtime executable` 和 `CLI entrypoint`，因此 Desktop 启动故障不会被健康的 Agent integration 掩盖。当托管 runtime 缺失或过期，或者已配置的 Agent integration 过期、无法启动、发生冲突或 MCP handshake 失败时，doctor 返回非零退出状态；从未配置的可选 Agent 会显示状态，但不会导致命令失败。运行 `polarbear-memory install` 可修复 descriptor 和全部托管 integration。
 
 ## Lifecycle maintenance
 

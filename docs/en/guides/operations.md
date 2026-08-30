@@ -10,7 +10,7 @@ polarbear-memory doctor
 polarbear-memory doctor --export
 ```
 
-Diagnostics exports exclude Memory content, repository paths, tokens, and raw session identifiers. Doctor returns a non-zero exit status when a configured Agent integration is stale, unlaunchable, conflicting, or fails the MCP handshake; an optional Agent that was never configured is reported but does not fail the command.
+Diagnostics exports exclude Memory content, repository paths, tokens, and raw session identifiers. Doctor reports `Runtime descriptor`, `Runtime executable`, and `CLI entrypoint` separately so Desktop startup failures cannot be hidden by healthy Agent integrations. It returns a non-zero exit status when that managed runtime is missing or stale, or when a configured Agent integration is stale, unlaunchable, conflicting, or fails the MCP handshake; an optional Agent that was never configured is reported but does not fail the command. Run `polarbear-memory install` to repair the descriptor and all managed integrations.
 
 ## Maintenance
 

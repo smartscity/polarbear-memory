@@ -31,6 +31,7 @@ try {
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
     "api/admin-v1.json",
+    "api/runtime-launch-v1.json",
     "dist/cli.js",
     "package.json",
   ]);
@@ -50,7 +51,7 @@ try {
     }
   }
 
-  const expectedFiles = ["dist", "api/admin-v1.json", "README.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "LICENSE"];
+  const expectedFiles = ["dist", "api/admin-v1.json", "api/runtime-launch-v1.json", "README.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "LICENSE"];
   if (JSON.stringify(metadata.files) !== JSON.stringify(expectedFiles)) failures.push("package.json files allowlist changed.");
   if (metadata.private !== false) failures.push("package.json private must be false.");
   if (metadata.license !== "Apache-2.0") failures.push("package.json license must be Apache-2.0.");

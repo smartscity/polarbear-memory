@@ -1,0 +1,12 @@
+{
+  "contract": "polarbear-memory-runtime-launch",
+  "schemaVersion": 1,
+  "relativePath": [
+    "runtime",
+    "launch.json"
+  ],
+  "runtimeFields": [
+    "executable",
+    "cliEntrypoint"
+  ]
+}
