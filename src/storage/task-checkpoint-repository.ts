@@ -92,10 +92,14 @@ export class TaskCheckpointRepository {
   }
 
   latestCheckpoint(projectId: string, taskId: string): Checkpoint | undefined {
+    const task = this.requireTask(projectId, taskId);
+    if (!task.lastCheckpointId) return undefined;
+    // The task pointer is the durable chain head; checkpoint timestamps can tie at millisecond resolution.
     const row = this.#database.prepare(`
-      SELECT * FROM checkpoints WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
-    `).get(projectId, taskId) as CheckpointRow | undefined;
-    return row ? checkpointFromRow(row) : undefined;
+      SELECT * FROM checkpoints WHERE project_id = ? AND task_id = ? AND id = ?
+    `).get(projectId, taskId, task.lastCheckpointId) as CheckpointRow | undefined;
+    if (!row) throw new Error(`Task points to a missing checkpoint: ${task.lastCheckpointId}`);
+    return checkpointFromRow(row);
   }
 
   listCheckpoints(projectId: string, taskId: string, limit = 20): Checkpoint[] {
@@ -155,6 +159,10 @@ export class TaskCheckpointRepository {
           .run(id, projectId, input.executionRunId);
       }
     });
-    return this.latestCheckpoint(projectId, input.taskId) as Checkpoint;
+    const inserted = this.#database.prepare(`
+      SELECT * FROM checkpoints WHERE project_id = ? AND task_id = ? AND id = ?
+    `).get(projectId, input.taskId, id) as CheckpointRow | undefined;
+    if (!inserted) throw new Error(`Checkpoint was not persisted: ${id}`);
+    return checkpointFromRow(inserted);
   }
 }

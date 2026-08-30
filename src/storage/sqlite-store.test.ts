@@ -103,6 +103,47 @@ test("records and resets estimated Context compiler token savings", () => {
   }
 });
 
+test("uses the task checkpoint pointer as the durable chain head", () => {
+  const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-checkpoint-head-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "memory.db");
+  const store = new SqliteMemoryStore(path);
+  const projectId = "12121212-1212-4121-8121-121212121212";
+  store.initializeProject({ id: projectId, name: "checkpoint-head-fixture" });
+  try {
+    const task = store.contextOs().createTask(projectId, {
+      title: "Rotate the agent session", objective: "Preserve a durable checkpoint boundary.",
+    });
+    const state = {
+      changed: [], learned: [], decisionsAdded: [], constraintsAdded: [], failedAttempts: [], filesChanged: [],
+      verification: [], unresolved: [], remaining: ["Start the fresh session."],
+    };
+    const first = store.contextOs().checkpoint(projectId, {
+      taskId: task.id, status: "ACTIVE", phase: "IMPLEMENTATION", summary: "Original checkpoint.", state,
+      idempotencyKey: "checkpoint-head-first",
+    });
+    store.contextOs().checkpoint(projectId, {
+      taskId: task.id, status: "ACTIVE", phase: "IMPLEMENTATION", summary: "Rotation boundary.", state,
+      idempotencyKey: "checkpoint-head-second",
+    });
+    const chainHead = store.contextOs().getTask(projectId, task.id)?.lastCheckpointId;
+    assert.ok(chainHead);
+    assert.notEqual(chainHead, first.id);
+
+    const database = new DatabaseSync(path);
+    try {
+      database.prepare("UPDATE checkpoints SET created_at = ? WHERE id = ?")
+        .run("2099-01-01T00:00:00.000Z", first.id);
+    } finally {
+      database.close();
+    }
+
+    assert.equal(store.contextOs().latestCheckpoint(projectId, task.id)?.id, chainHead);
+  } finally {
+    store.close();
+  }
+});
+
 test("schema initialization, backup and FTS rebuild are reliable", async () => {
   const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-test-"));
   temporaryDirectories.push(directory);
