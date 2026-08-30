@@ -80,6 +80,13 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const generatedCodexConfig = readFileSync(codexConfigPath, "utf8");
     assert.match(generatedCodexConfig, new RegExp(`command = ${JSON.stringify(process.execPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
     assert.doesNotMatch(generatedCodexConfig, /command = "polarbear-memory"/u);
+    writeFileSync(codexConfigPath, `model = "keep-after-upgrade"\n\n[mcp_servers.polarbear-memory]\ncommand = "polarbear-memory"\nargs = ["mcp", "--stdio", "--project-root", ${JSON.stringify(repository)}]\n`);
+    const upgraded = run(process.execPath, offline(["install"]), repository, dataDir);
+    assert.doesNotMatch(upgraded.stderr, /unmanaged `polarbear-memory` MCP server/u);
+    const upgradedCodexConfig = readFileSync(codexConfigPath, "utf8");
+    assert.match(upgradedCodexConfig, /model = "keep-after-upgrade"/u);
+    assert.match(upgradedCodexConfig, /# BEGIN POLARBEAR MEMORY MANAGED MCP/u);
+    assert.doesNotMatch(upgradedCodexConfig, /command = "polarbear-memory"/u);
     const deprecatedCommand = run(
       process.execPath,
       offline(["claude", "install", "--dry-run", "--command", "polarbear-memory"]),
@@ -145,7 +152,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(doctor.stdout, /Codex MCP\s+config\s+OK/u);
     assert.match(doctor.stdout, /Codex MCP\s+handshake\s+OK/u);
 
-    writeFileSync(codexConfigPath, generatedCodexConfig.replace(
+    writeFileSync(codexConfigPath, upgradedCodexConfig.replace(
       `command = ${JSON.stringify(process.execPath)}`,
       'command = "/nonexistent/polarbear-runtime/node"',
     ));

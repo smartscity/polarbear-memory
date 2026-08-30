@@ -21,7 +21,7 @@ export function runCodexCommand(cwd: string, args: string[]): void {
   if (result.plan.alreadyInstalled) console.log("Codex integration is already installed.");
   else if (parsed.values["dry-run"]) console.log("Dry run only; no files were changed.");
   else {
-    if (result.plan.legacyConfiguration) console.log("Legacy Codex MCP configuration detected and updated.");
+    if (result.plan.migrationRequired) console.log("Existing Polarbear Codex MCP configuration detected and updated.");
     console.log(`Backup:     ${result.backupDir}`);
     console.log("Codex integration installed. Restart active Codex clients.");
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { buildPolarbearLaunchSpec, resolveAgentRuntime, type AgentLaunchSpec, type AgentRuntime } from "../../platform/agent-launch.js";
 import type { ProjectBinding } from "../../platform/project.js";
 
@@ -9,12 +9,19 @@ const MANAGED_BEGIN = "# BEGIN POLARBEAR MEMORY MANAGED MCP";
 const MANAGED_END = "# END POLARBEAR MEMORY MANAGED MCP";
 const SERVER_HEADER = /^\s*\[mcp_servers\.(?:polarbear-memory|"polarbear-memory")\]\s*(?:#.*)?$/mu;
 
+export type CodexConfigurationClassification =
+  | "CURRENT_MANAGED"
+  | "LEGACY_MANAGED"
+  | "REPAIRABLE_POLARBEAR"
+  | "FOREIGN_COLLISION";
+
 export interface CodexIntegrationPlan {
   configPath: string;
   backupRequired: boolean;
   alreadyInstalled: boolean;
   conflict: boolean;
-  legacyConfiguration: boolean;
+  classification: CodexConfigurationClassification | null;
+  migrationRequired: boolean;
 }
 
 export interface CodexUninstallPlan {
@@ -108,25 +115,48 @@ function parseLaunchSpec(body: string): AgentLaunchSpec | undefined {
   }
 }
 
-function legacyServer(content: string, project: ProjectBinding): { start: number; end: number } | null {
-  const range = serverRange(content);
-  if (!range) return null;
-  const spec = parseLaunchSpec(range.body);
-  if (!spec || spec.command !== "polarbear-memory") return null;
-  const expected = ["mcp", "--stdio", "--project-root", project.root];
-  return spec.args.length === expected.length && spec.args.every((value, index) => value === expected[index])
-    ? { start: range.start, end: range.end }
-    : null;
+function hasPolarbearMcpArguments(args: string[], offset = 0): boolean {
+  return args.length === offset + 4
+    && args[offset] === "mcp"
+    && args[offset + 1] === "--stdio"
+    && args[offset + 2] === "--project-root"
+    && Boolean(args[offset + 3]);
 }
 
-function desiredConfig(existing: string | null, project: ProjectBinding, spec: AgentLaunchSpec): string {
+function classifyCodexConfiguration(
+  content: string,
+  runtime: AgentRuntime,
+): CodexConfigurationClassification | null {
+  if (managedRange(content)) return "CURRENT_MANAGED";
+  const server = serverRange(content);
+  if (!server) return null;
+  const spec = parseLaunchSpec(server.body);
+  if (spec?.command === "polarbear-memory" && hasPolarbearMcpArguments(spec.args)) return "LEGACY_MANAGED";
+  if (spec && isAbsolute(spec.command) && spec.args[0] === runtime.cliEntrypoint && hasPolarbearMcpArguments(spec.args, 1)) {
+    return "REPAIRABLE_POLARBEAR";
+  }
+  return "FOREIGN_COLLISION";
+}
+
+function desiredConfig(
+  existing: string | null,
+  project: ProjectBinding,
+  spec: AgentLaunchSpec,
+  classification: CodexConfigurationClassification | null,
+): string {
   const block = `${managedBlock(spec)}\n`;
   if (existing === null || existing.trim() === "") return block;
-  const range = managedRange(existing);
-  if (range) return `${existing.slice(0, range.start)}${block}${existing.slice(range.end)}`;
-  const legacy = legacyServer(existing, project);
-  if (legacy) return `${existing.slice(0, legacy.start)}${block}${existing.slice(legacy.end)}`;
-  if (SERVER_HEADER.test(existing)) {
+  if (classification === "CURRENT_MANAGED") {
+    const range = managedRange(existing);
+    if (!range) throw new Error("Codex managed configuration classification is inconsistent.");
+    return `${existing.slice(0, range.start)}${block}${existing.slice(range.end)}`;
+  }
+  if (classification === "LEGACY_MANAGED" || classification === "REPAIRABLE_POLARBEAR") {
+    const range = serverRange(existing);
+    if (!range) throw new Error("Codex migration configuration classification is inconsistent.");
+    return `${existing.slice(0, range.start)}${block}${existing.slice(range.end)}`;
+  }
+  if (classification === "FOREIGN_COLLISION") {
     throw new Error("Codex already has an unmanaged `polarbear-memory` MCP server. Remove or rename it before installing.");
   }
   return `${existing.trimEnd()}\n\n${block}`;
@@ -151,16 +181,18 @@ function backup(project: ProjectBinding, current: string | null, category: "code
 export function planCodexIntegration(project: ProjectBinding, runtime: AgentRuntime = resolveAgentRuntime()): CodexIntegrationPlan {
   const configPath = assertSafeConfigPath(project.root);
   const current = existsSync(configPath) ? readFileSync(configPath, "utf8") : null;
-  const range = current === null ? null : managedRange(current);
-  const legacyConfiguration = range === null && current !== null && legacyServer(current, project) !== null;
-  const conflict = range === null && current !== null && !legacyConfiguration && SERVER_HEADER.test(current);
   const spec = launchSpec(project, runtime);
+  const classification = current === null ? null : classifyCodexConfiguration(current, runtime);
+  const conflict = classification === "FOREIGN_COLLISION";
   return {
     configPath,
     backupRequired: current !== null,
-    alreadyInstalled: !conflict && current !== null && current === desiredConfig(current, project, spec),
+    alreadyInstalled: classification === "CURRENT_MANAGED"
+      && current !== null
+      && current === desiredConfig(current, project, spec, classification),
     conflict,
-    legacyConfiguration,
+    classification,
+    migrationRequired: classification === "LEGACY_MANAGED" || classification === "REPAIRABLE_POLARBEAR",
   };
 }
 
@@ -176,7 +208,7 @@ export function installCodexIntegration(
   if (options.dryRun || plan.alreadyInstalled) return { plan };
   const current = existsSync(plan.configPath) ? readFileSync(plan.configPath, "utf8") : null;
   const backupDir = backup(project, current, "codex");
-  atomicWrite(plan.configPath, desiredConfig(current, project, launchSpec(project, runtime)));
+  atomicWrite(plan.configPath, desiredConfig(current, project, launchSpec(project, runtime), plan.classification));
   return { plan, backupDir };
 }
 

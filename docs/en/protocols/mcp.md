@@ -27,7 +27,7 @@ It initializes the project when needed and configures every currently supported 
 - Claude Code: `.mcp.json`, Agent rules, and lifecycle hooks;
 - Codex: project-scoped `.codex/config.toml` and MCP server instructions.
 
-Restart active Agent clients after installation. Existing unrelated configuration is preserved, managed changes are backed up, and legacy PATH-based Polarbear entries are migrated automatically. Re-run the installer after moving or upgrading the active runtime. Use `polarbear-memory install --dry-run` for a non-mutating preview.
+Restart active Agent clients after installation. Existing unrelated configuration is preserved and managed changes are backed up. The Codex installer classifies a same-name entry as current managed, legacy managed, repairable Polarbear, or a foreign collision. Current entries are refreshed safely; legacy PATH-based entries from earlier releases and entries that clearly launch the installed Polarbear package are migrated automatically. Only an entry whose Polarbear ownership cannot be established is refused as an unmanaged collision. Re-running the installer is idempotent. Re-run it after moving or upgrading the active runtime. Use `polarbear-memory install --dry-run` for a non-mutating preview.
 
 Other MCP-compatible clients can configure the same stdio server manually:
 

@@ -50,7 +50,9 @@ test("Codex integration dry-run is non-mutating and install preserves other conf
     assert.match(config, /\[mcp_servers\.existing\]/u);
     assert.match(config, /\[mcp_servers\.polarbear-memory\]/u);
     assert.equal(readCodexLaunchSpec(project)?.args.at(-1), project.root);
-    assert.equal(planCodexIntegration(project).alreadyInstalled, true);
+    const current = planCodexIntegration(project);
+    assert.equal(current.classification, "CURRENT_MANAGED");
+    assert.equal(current.alreadyInstalled, true);
     installCodexIntegration(project, { dryRun: false });
     assert.equal(readFileSync(configPath, "utf8"), config);
   } finally {
@@ -64,22 +66,25 @@ test("Codex integration refuses to overwrite an unmanaged server with the same n
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "config.toml"), `[mcp_servers.polarbear-memory]\ncommand = "custom"\n`);
   try {
-    assert.equal(planCodexIntegration(project).conflict, true);
+    const plan = planCodexIntegration(project);
+    assert.equal(plan.classification, "FOREIGN_COLLISION");
+    assert.equal(plan.conflict, true);
     assert.throws(() => installCodexIntegration(project, { dryRun: false }), /unmanaged/u);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
 });
 
-test("Codex integration generates runtime-derived argv and migrates the legacy PATH command", () => {
+test("Codex integration migrates the Polarbear Memory 0.3.2 PATH configuration", () => {
   const { temporary, project } = fixture();
   const directory = join(project.root, ".codex");
   const configPath = join(directory, "config.toml");
   mkdirSync(directory, { recursive: true });
-  writeFileSync(configPath, `model = "keep"\n\n[mcp_servers.polarbear-memory]\ncommand = "polarbear-memory"\nargs = [\n  "mcp",\n  "--stdio",\n  "--project-root",\n  ${JSON.stringify(project.root)}\n]\n`);
+  writeFileSync(configPath, `model = "keep"\n\n[mcp_servers.polarbear-memory]\ncommand = "polarbear-memory"\nargs = ["mcp", "--stdio", "--project-root", "/project"]\n`);
   try {
     const preview = planCodexIntegration(project, arbitraryRuntime);
-    assert.equal(preview.legacyConfiguration, true);
+    assert.equal(preview.classification, "LEGACY_MANAGED");
+    assert.equal(preview.migrationRequired, true);
     assert.equal(preview.conflict, false);
     installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
     const migrated = readFileSync(configPath, "utf8");
@@ -87,6 +92,32 @@ test("Codex integration generates runtime-derived argv and migrates the legacy P
     assert.match(migrated, /command = "\/Arbitrary Runtime\/Current\/node"/u);
     assert.match(migrated, /"\/Arbitrary Package\/Polarbear\/dist\/cli\.js", "mcp"/u);
     assert.doesNotMatch(migrated, /command = "polarbear-memory"/u);
+    assert.equal(readCodexLaunchSpec(project)?.args.at(-1), project.root);
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    assert.equal(readFileSync(configPath, "utf8"), migrated);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Codex integration normalizes a repairable installed-package launch", () => {
+  const { temporary, project } = fixture();
+  const directory = join(project.root, ".codex");
+  const configPath = join(directory, "config.toml");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(configPath, `model = "keep"\n\n[mcp_servers.polarbear-memory]\ncommand = "/Old Runtime/node"\nargs = [${JSON.stringify(arbitraryRuntime.cliEntrypoint)}, "mcp", "--stdio", "--project-root", "/previous/project"]\nrequired = false\n`);
+  try {
+    const preview = planCodexIntegration(project, arbitraryRuntime);
+    assert.equal(preview.classification, "REPAIRABLE_POLARBEAR");
+    assert.equal(preview.migrationRequired, true);
+    assert.equal(preview.conflict, false);
+
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    const migrated = readFileSync(configPath, "utf8");
+    assert.match(migrated, /model = "keep"/u);
+    assert.match(migrated, /# BEGIN POLARBEAR MEMORY MANAGED MCP/u);
+    assert.match(migrated, /required = true/u);
+    assert.equal(readCodexLaunchSpec(project)?.args.at(-1), project.root);
     installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
     assert.equal(readFileSync(configPath, "utf8"), migrated);
   } finally {

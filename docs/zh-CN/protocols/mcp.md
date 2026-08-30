@@ -27,7 +27,7 @@ polarbear-memory install
 - Claude Code：`.mcp.json`、Agent rules 和 lifecycle hooks；
 - Codex：项目级 `.codex/config.toml` 和 MCP server instructions。
 
-安装后重启正在运行的 Agent 客户端。安装器保留无关配置、备份托管修改，并自动迁移旧的 PATH 依赖配置。移动或升级当前 runtime 后，应重新运行安装器。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
+安装后重启正在运行的 Agent 客户端。安装器会保留无关配置并备份托管修改。Codex 安装器把同名条目分为当前托管、旧版托管、可修复 Polarbear 配置或外部冲突：当前配置会被安全刷新；早期版本生成的 PATH 依赖配置，以及可以明确判断为启动当前已安装 Polarbear 包的配置，会被自动迁移；只有无法确认 Polarbear 所有权的条目才会作为未托管冲突拒绝覆盖。重复运行安装器是幂等的。移动或升级当前 runtime 后，应重新运行安装器。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
 
 其他兼容 MCP 的客户端可手动配置同一个 stdio server：
 

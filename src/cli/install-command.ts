@@ -48,7 +48,7 @@ export function runInstallCommand(cwd: string, args: string[]): void {
   console.log("Agent integrations");
   console.log(`Claude Code  ${status(claudePlan.alreadyInstalled, parsed.values["dry-run"])}`);
   console.log(`Codex        ${status(codexPlan.alreadyInstalled, parsed.values["dry-run"])}`);
-  if (claudePlan.legacyConfiguration || codexPlan.legacyConfiguration) {
+  if (claudePlan.legacyConfiguration || codexPlan.migrationRequired) {
     console.log(parsed.values["dry-run"]
       ? "Legacy Agent configuration detected; runtime launch commands would be updated."
       : "Legacy Agent configuration detected; runtime launch commands were updated.");
