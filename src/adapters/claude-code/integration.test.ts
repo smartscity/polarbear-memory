@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ProjectBinding } from "../../platform/project.js";
+import type { AgentRuntime } from "../../platform/agent-launch.js";
 import { installClaudeIntegration, planClaudeIntegration, restoreLatestClaudeIntegration, uninstallClaudeIntegration } from "./integration.js";
 
 function fixture(): { temporary: string; project: ProjectBinding } {
@@ -23,6 +24,11 @@ function fixture(): { temporary: string; project: ProjectBinding } {
     },
   };
 }
+
+const arbitraryRuntime: AgentRuntime = {
+  executable: "/Arbitrary Runtime/Current/node",
+  cliEntrypoint: "/Arbitrary Package/Polarbear/dist/cli.js",
+};
 
 test("Claude integration dry-run is non-mutating and install preserves other MCP servers", () => {
   const { temporary, project } = fixture();
@@ -62,6 +68,41 @@ test("Claude restore removes newly installed managed files without deleting the 
     assert.equal(restoredFrom, installed.backupDir);
     assert.throws(() => readFileSync(join(project.root, ".mcp.json"), "utf8"), /ENOENT/);
     assert.match(readFileSync(join(restoredFrom, ".mcp.json.installed"), "utf8"), /polarbear-memory/);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Claude integration migrates MCP and hooks to the shared runtime launch", () => {
+  const { temporary, project } = fixture();
+  const mcpPath = join(project.root, ".mcp.json");
+  const settingsPath = join(project.root, ".claude", "settings.json");
+  mkdirSync(join(project.root, ".claude"), { recursive: true });
+  writeFileSync(mcpPath, `${JSON.stringify({
+    mcpServers: {
+      existing: { command: "keep" },
+      "polarbear-memory": { command: "polarbear-memory", args: ["mcp", "--stdio"] },
+    },
+  }, null, 2)}\n`);
+  writeFileSync(settingsPath, `${JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: "'polarbear-memory' hook ingest --event Stop" }] }] },
+  }, null, 2)}\n`);
+  try {
+    assert.equal(planClaudeIntegration(project, arbitraryRuntime).legacyConfiguration, true);
+    installClaudeIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    const mcp = JSON.parse(readFileSync(mcpPath, "utf8")) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    assert.equal(mcp.mcpServers.existing?.command, "keep");
+    assert.equal(mcp.mcpServers["polarbear-memory"]?.command, arbitraryRuntime.executable);
+    assert.equal(mcp.mcpServers["polarbear-memory"]?.args[0], arbitraryRuntime.cliEntrypoint);
+    assert.equal(mcp.mcpServers["polarbear-memory"]?.args.at(-1), project.root);
+    const installedSettings = readFileSync(settingsPath, "utf8");
+    assert.doesNotMatch(installedSettings, /'polarbear-memory' hook/u);
+    assert.match(installedSettings, /Arbitrary Runtime/u);
+    const installed = `${readFileSync(mcpPath, "utf8")}\n${installedSettings}`;
+    installClaudeIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    assert.equal(`${readFileSync(mcpPath, "utf8")}\n${readFileSync(settingsPath, "utf8")}`, installed);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

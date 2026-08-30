@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ProjectBinding } from "../../platform/project.js";
+import type { AgentRuntime } from "../../platform/agent-launch.js";
 import { installCodexIntegration, planCodexIntegration, uninstallCodexIntegration } from "./integration.js";
 
 function fixture(): { temporary: string; project: ProjectBinding } {
@@ -23,6 +24,11 @@ function fixture(): { temporary: string; project: ProjectBinding } {
     },
   };
 }
+
+const arbitraryRuntime: AgentRuntime = {
+  executable: "/Arbitrary Runtime/Current/node",
+  cliEntrypoint: "/Arbitrary Package/Polarbear/dist/cli.js",
+};
 
 test("Codex integration dry-run is non-mutating and install preserves other configuration", () => {
   const { temporary, project } = fixture();
@@ -58,6 +64,29 @@ test("Codex integration refuses to overwrite an unmanaged server with the same n
   try {
     assert.equal(planCodexIntegration(project).conflict, true);
     assert.throws(() => installCodexIntegration(project, { dryRun: false }), /unmanaged/u);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Codex integration generates runtime-derived argv and migrates the legacy PATH command", () => {
+  const { temporary, project } = fixture();
+  const directory = join(project.root, ".codex");
+  const configPath = join(directory, "config.toml");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(configPath, `model = "keep"\n\n[mcp_servers.polarbear-memory]\ncommand = "polarbear-memory"\nargs = [\n  "mcp",\n  "--stdio",\n  "--project-root",\n  ${JSON.stringify(project.root)}\n]\n`);
+  try {
+    const preview = planCodexIntegration(project, arbitraryRuntime);
+    assert.equal(preview.legacyConfiguration, true);
+    assert.equal(preview.conflict, false);
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    const migrated = readFileSync(configPath, "utf8");
+    assert.match(migrated, /model = "keep"/u);
+    assert.match(migrated, /command = "\/Arbitrary Runtime\/Current\/node"/u);
+    assert.match(migrated, /"\/Arbitrary Package\/Polarbear\/dist\/cli\.js", "mcp"/u);
+    assert.doesNotMatch(migrated, /command = "polarbear-memory"/u);
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    assert.equal(readFileSync(configPath, "utf8"), migrated);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

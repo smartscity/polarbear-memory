@@ -9,6 +9,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import {
+  buildPolarbearLaunchSpec, resolveAgentRuntime, serializeShellCommand,
+  type AgentLaunchSpec, type AgentRuntime,
+} from "../../platform/agent-launch.js";
 import type { ProjectBinding } from "../../platform/project.js";
 import { CLAUDE_HOOK_EVENTS } from "./hooks.js";
 
@@ -48,6 +52,7 @@ export interface ClaudeIntegrationPlan {
   settingsPath: string;
   backupRequired: boolean;
   alreadyInstalled: boolean;
+  legacyConfiguration: boolean;
 }
 
 function assertRegularOrMissing(path: string): void {
@@ -75,7 +80,15 @@ function atomicWrite(path: string, content: string): void {
   renameSync(temporary, path);
 }
 
-function desiredMcpConfig(existing: string | null, command: string): string {
+function mcpLaunchSpec(project: ProjectBinding, runtime: AgentRuntime): AgentLaunchSpec {
+  return buildPolarbearLaunchSpec(runtime, ["mcp", "--stdio", "--project-root", project.root]);
+}
+
+function hookLaunchSpec(runtime: AgentRuntime, event: typeof CLAUDE_HOOK_EVENTS[number]): AgentLaunchSpec {
+  return buildPolarbearLaunchSpec(runtime, ["hook", "ingest", "--event", event]);
+}
+
+function desiredMcpConfig(existing: string | null, spec: AgentLaunchSpec): string {
   let root: Record<string, unknown> = {};
   if (existing !== null) {
     const parsed: unknown = JSON.parse(existing);
@@ -92,28 +105,27 @@ function desiredMcpConfig(existing: string | null, command: string): string {
     ...(currentServers as Record<string, unknown> | undefined),
     "polarbear-memory": {
       type: "stdio",
-      command,
-      args: ["mcp", "--stdio", "--project-root", "${CLAUDE_PROJECT_DIR:-.}"],
+      command: spec.command,
+      args: spec.args,
     },
   };
   return `${JSON.stringify(root, null, 2)}\n`;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-function isManagedHook(entry: unknown, command: string, event: typeof CLAUDE_HOOK_EVENTS[number]): boolean {
+function isManagedHook(entry: unknown, event: typeof CLAUDE_HOOK_EVENTS[number], runtime: AgentRuntime): boolean {
   if (!entry || typeof entry !== "object") return false;
   const hooks = (entry as { hooks?: unknown }).hooks;
   if (!Array.isArray(hooks)) return false;
-  const expected = `${shellQuote(command)} hook ingest --event ${event}`;
-  return hooks.some((hook) => hook && typeof hook === "object"
-    && (hook as { type?: unknown }).type === "command"
-    && (hook as { command?: unknown }).command === expected);
+  return hooks.some((hook) => {
+    if (!hook || typeof hook !== "object" || (hook as { type?: unknown }).type !== "command") return false;
+    const command = (hook as { command?: unknown }).command;
+    if (typeof command !== "string") return false;
+    if (command === serializeShellCommand(hookLaunchSpec(runtime, event))) return true;
+    return command.endsWith(`hook ingest --event ${event}`) && /(?:polarbear-memory|[/\\]cli\.js)/u.test(command);
+  });
 }
 
-function desiredClaudeSettings(existing: string | null, command: string): string {
+function desiredClaudeSettings(existing: string | null, runtime: AgentRuntime): string {
   let root: Record<string, unknown> = {};
   if (existing !== null) {
     const parsed: unknown = JSON.parse(existing);
@@ -131,13 +143,13 @@ function desiredClaudeSettings(existing: string | null, command: string): string
     const current = hooks[event];
     if (current !== undefined && !Array.isArray(current)) throw new Error(`Claude ${event} hooks must be an array.`);
     const entries = (current ?? []) as unknown[];
-    const withoutManaged = entries.filter((entry) => !isManagedHook(entry, command, event));
+    const withoutManaged = entries.filter((entry) => !isManagedHook(entry, event, runtime));
     hooks[event] = [
       ...withoutManaged,
       {
         hooks: [{
           type: "command",
-          command: `${shellQuote(command)} hook ingest --event ${event}`,
+          command: serializeShellCommand(hookLaunchSpec(runtime, event)),
           timeout: event === "SessionEnd" || event === "PreCompact" || event === "SessionStart" ? 5 : 2,
         }],
       },
@@ -147,7 +159,26 @@ function desiredClaudeSettings(existing: string | null, command: string): string
   return `${JSON.stringify(root, null, 2)}\n`;
 }
 
-export function planClaudeIntegration(project: ProjectBinding, command = "polarbear-memory"): ClaudeIntegrationPlan {
+function existingMcpLaunch(content: string | null): AgentLaunchSpec | undefined {
+  if (content === null) return undefined;
+  const parsed: unknown = JSON.parse(content);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const servers = (parsed as { mcpServers?: unknown }).mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return undefined;
+  const entry = (servers as Record<string, unknown>)["polarbear-memory"];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const command = (entry as { command?: unknown }).command;
+  const args = (entry as { args?: unknown }).args;
+  return typeof command === "string" && Array.isArray(args) && args.every((value) => typeof value === "string")
+    ? { command, args } as AgentLaunchSpec
+    : undefined;
+}
+
+function hasLegacyHooks(content: string | null): boolean {
+  return content !== null && /["']?polarbear-memory["']? hook ingest --event/u.test(content);
+}
+
+export function planClaudeIntegration(project: ProjectBinding, runtime: AgentRuntime = resolveAgentRuntime()): ClaudeIntegrationPlan {
   const mcpPath = join(project.root, MCP_FILE);
   const rulePath = join(project.root, RULE_FILE);
   const settingsPath = join(project.root, SETTINGS_FILE);
@@ -156,25 +187,27 @@ export function planClaudeIntegration(project: ProjectBinding, command = "polarb
   assertRegularOrMissing(rulePath);
   assertRegularOrMissing(settingsPath);
   const currentMcp = readOptional(mcpPath);
-  const wantedMcp = desiredMcpConfig(currentMcp, command);
+  const wantedMcp = desiredMcpConfig(currentMcp, mcpLaunchSpec(project, runtime));
   const currentRule = readOptional(rulePath);
   const currentSettings = readOptional(settingsPath);
-  const wantedSettings = desiredClaudeSettings(currentSettings, command);
+  const wantedSettings = desiredClaudeSettings(currentSettings, runtime);
+  const currentLaunch = existingMcpLaunch(currentMcp);
   return {
     mcpPath,
     rulePath,
     settingsPath,
     backupRequired: currentMcp !== null || currentRule !== null || currentSettings !== null,
     alreadyInstalled: currentMcp === wantedMcp && currentRule === MANAGED_RULE && currentSettings === wantedSettings,
+    legacyConfiguration: currentLaunch?.command === "polarbear-memory" || hasLegacyHooks(currentSettings),
   };
 }
 
 export function installClaudeIntegration(
   project: ProjectBinding,
-  options: { dryRun: boolean; command?: string },
+  options: { dryRun: boolean; runtime?: AgentRuntime },
 ): { plan: ClaudeIntegrationPlan; backupDir?: string } {
-  const command = options.command ?? "polarbear-memory";
-  const plan = planClaudeIntegration(project, command);
+  const runtime = options.runtime ?? resolveAgentRuntime();
+  const plan = planClaudeIntegration(project, runtime);
   if (options.dryRun || plan.alreadyInstalled) return { plan };
 
   const currentMcp = readOptional(plan.mcpPath);
@@ -193,10 +226,16 @@ export function installClaudeIntegration(
     files: { [MCP_FILE]: currentMcp, [RULE_FILE]: currentRule, [SETTINGS_FILE]: currentSettings },
   };
   atomicWrite(join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  atomicWrite(plan.mcpPath, desiredMcpConfig(currentMcp, command));
+  atomicWrite(plan.mcpPath, desiredMcpConfig(currentMcp, mcpLaunchSpec(project, runtime)));
   atomicWrite(plan.rulePath, MANAGED_RULE);
-  atomicWrite(plan.settingsPath, desiredClaudeSettings(currentSettings, command));
+  atomicWrite(plan.settingsPath, desiredClaudeSettings(currentSettings, runtime));
   return { plan, backupDir };
+}
+
+export function readClaudeLaunchSpec(project: ProjectBinding): AgentLaunchSpec | undefined {
+  const path = join(project.root, MCP_FILE);
+  assertRegularOrMissing(path);
+  return existingMcpLaunch(readOptional(path));
 }
 
 export function restoreLatestClaudeIntegration(project: ProjectBinding): string {
@@ -253,7 +292,9 @@ function managedMemoryHook(entry: unknown): boolean {
   return hooks.some((hook) => {
     if (!hook || typeof hook !== "object") return false;
     const command = (hook as { command?: unknown }).command;
-    return typeof command === "string" && /(?:polarbear-memory|\/cli\.js)'? hook ingest --event (?:SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd)$/u.test(command);
+    return typeof command === "string"
+      && /(?:polarbear-memory|[/\\]cli\.js)/u.test(command)
+      && /["']?hook["']?\s+["']?ingest["']?\s+["']?--event["']?\s+["']?(?:SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd)["']?$/u.test(command);
   });
 }
 

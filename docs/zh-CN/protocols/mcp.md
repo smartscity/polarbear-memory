@@ -27,18 +27,26 @@ polarbear-memory install
 - Claude Code：`.mcp.json`、Agent rules 和 lifecycle hooks；
 - Codex：项目级 `.codex/config.toml` 和 MCP server instructions。
 
-安装后重启正在运行的 Agent 客户端。安装器保留无关配置，并备份托管修改。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
+安装后重启正在运行的 Agent 客户端。安装器保留无关配置、备份托管修改，并自动迁移旧的 PATH 依赖配置。移动或升级当前 runtime 后，应重新运行安装器。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
 
 其他兼容 MCP 的客户端可手动配置同一个 stdio server：
 
 ```json
 {
-  "command": "polarbear-memory",
-  "args": ["mcp", "--stdio", "--project-root", "/absolute/path/to/repository"]
+  "command": "/当前-node-runtime/的绝对路径",
+  "args": [
+    "/polarbear-memory/dist/cli.js/的绝对路径",
+    "mcp",
+    "--stdio",
+    "--project-root",
+    "/仓库的绝对路径"
+  ]
 }
 ```
 
-该进程由客户端启动。正常使用时，用户不需要在终端手动运行 `polarbear-memory mcp --stdio`，也不需要手动调用 MCP 工具。
+Runtime 与 CLI 路径必须属于同一个可工作的 Polarbear 安装。受支持的安装器从当前 Polarbear 进程取得这两个路径，不搜索 shell profile、runtime manager 或 `PATH`。该进程由客户端启动。正常使用时，用户不需要在终端手动运行 `polarbear-memory mcp --stdio`，也不需要手动调用 MCP 工具。
+
+`polarbear-memory doctor` 会在最小环境中检查配置是否过期、runtime 与 CLI 是否存在，并执行 MCP initialize handshake。即使配置条目存在，runtime 路径失效也会报告失败。
 
 ## 默认工具分组
 

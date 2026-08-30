@@ -5,14 +5,17 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { compileContext } from "../application/context.js";
 import { runMaintenance } from "../application/maintenance.js";
-import { planClaudeIntegration } from "../adapters/claude-code/integration.js";
-import { planCodexIntegration } from "../adapters/codex/integration.js";
+import { planClaudeIntegration, readClaudeLaunchSpec } from "../adapters/claude-code/integration.js";
+import { planCodexIntegration, readCodexLaunchSpec } from "../adapters/codex/integration.js";
 import { parseMemoryType } from "../domain/memory.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 import { discoverGitContext, normalizeRepoFile } from "../platform/git.js";
 import { loadProject } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { VERSION } from "../version.js";
+import {
+  minimalAgentEnvironment, probeMcpLaunch, validateAgentLaunchSpec, type AgentLaunchSpec,
+} from "../platform/agent-launch.js";
 
 function parseNumber(value: string | undefined, fallback: number, label: string): number {
   if (value === undefined) return fallback;
@@ -291,7 +294,37 @@ export function forget(cwd: string, args: string[]): void {
   });
 }
 
-export function doctor(cwd: string, args: string[]): void {
+async function reportAgentIntegration(
+  label: string,
+  configStatus: "OK" | "STALE" | "CONFLICT" | "NOT INSTALLED",
+  spec: AgentLaunchSpec | undefined,
+  projectRoot: string,
+): Promise<{ configured: boolean; executable: boolean; handshake: boolean }> {
+  const prefix = label.padEnd(10);
+  console.log(`${prefix} config       ${configStatus}`);
+  if (!spec) {
+    console.log(`${prefix} executable   NOT CONFIGURED`);
+    console.log(`${prefix} handshake    NOT RUN`);
+    return { configured: false, executable: false, handshake: false };
+  }
+  const validation = validateAgentLaunchSpec(spec);
+  console.log(`${prefix} executable   ${validation.ok ? "OK" : "FAILED"}`);
+  if (!validation.ok) {
+    console.log(`  ${validation.detail}`);
+    console.log("  Run: polarbear-memory install");
+    console.log(`${prefix} handshake    NOT RUN`);
+    return { configured: configStatus === "OK", executable: false, handshake: false };
+  }
+  const probe = await probeMcpLaunch(spec, { cwd: projectRoot, env: minimalAgentEnvironment() });
+  console.log(`${prefix} handshake    ${probe.ok ? "OK" : "FAILED"}`);
+  if (!probe.ok) {
+    console.log(`  ${probe.detail}`);
+    console.log("  Run: polarbear-memory install");
+  }
+  return { configured: configStatus === "OK", executable: true, handshake: probe.ok };
+}
+
+export async function doctor(cwd: string, args: string[]): Promise<void> {
   const parsed = parseArgs({ args, options: { export: { type: "boolean", default: false } }, strict: true });
   const git = discoverGitContext(cwd);
   const project = loadProject(git);
@@ -305,9 +338,15 @@ export function doctor(cwd: string, args: string[]): void {
   });
   console.log("Git          OK");
   const integration = planClaudeIntegration(project);
-  console.log(`Claude MCP   ${integration.alreadyInstalled ? "OK" : "NOT INSTALLED"}`);
   const codexIntegration = planCodexIntegration(project);
-  console.log(`Codex MCP    ${codexIntegration.alreadyInstalled ? "OK" : codexIntegration.conflict ? "CONFLICT" : "NOT INSTALLED"}`);
+  const claudeSpec = readClaudeLaunchSpec(project);
+  const codexSpec = readCodexLaunchSpec(project);
+  const claudeStatus = integration.alreadyInstalled ? "OK" : claudeSpec ? "STALE" : "NOT INSTALLED";
+  const codexStatus = codexIntegration.alreadyInstalled
+    ? "OK"
+    : codexIntegration.conflict ? "CONFLICT" : codexSpec ? "STALE" : "NOT INSTALLED";
+  const claudeDiagnostics = await reportAgentIntegration("Claude MCP", claudeStatus, claudeSpec, project.root);
+  const codexDiagnostics = await reportAgentIntegration("Codex MCP", codexStatus, codexSpec, project.root);
   console.log("Network      disabled by design");
   if (parsed.values.export) {
     const diagnosticsDirectory = join(project.dataDir, "diagnostics");
@@ -325,8 +364,12 @@ export function doctor(cwd: string, args: string[]): void {
       repository: { branchPresent: Boolean(git.branch), headPresent: Boolean(git.head) },
       counts: statusCounts,
       integrations: {
-        claudeInstalled: planClaudeIntegration(project).alreadyInstalled,
-        codexInstalled: codexIntegration.alreadyInstalled,
+        claudeInstalled: claudeDiagnostics.configured,
+        claudeExecutable: claudeDiagnostics.executable,
+        claudeHandshake: claudeDiagnostics.handshake,
+        codexInstalled: codexDiagnostics.configured,
+        codexExecutable: codexDiagnostics.executable,
+        codexHandshake: codexDiagnostics.handshake,
         codexConflict: codexIntegration.conflict,
       },
       networkPolicy: "disabled",

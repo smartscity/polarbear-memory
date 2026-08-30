@@ -28,6 +28,8 @@ npm pack --dry-run
 
 The package audit enforces the publication allowlist. Do not rely only on `.gitignore` or `.npmignore`.
 
+CI also runs the Agent integration suite on macOS, Linux, and Windows with the minimum supported Node 24 release and the latest supported Node 26 release. It covers structured launch generation, legacy migration, paths with spaces, minimal-PATH MCP startup, and doctor repair diagnostics.
+
 ## npm publication
 
 Publish only from the reviewed commit whose tag matches the package version:

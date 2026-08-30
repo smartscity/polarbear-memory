@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { buildPolarbearLaunchSpec, resolveAgentRuntime, type AgentLaunchSpec, type AgentRuntime } from "../../platform/agent-launch.js";
 import type { ProjectBinding } from "../../platform/project.js";
 
 const CONFIG_FILE = join(".codex", "config.toml");
@@ -13,6 +14,7 @@ export interface CodexIntegrationPlan {
   backupRequired: boolean;
   alreadyInstalled: boolean;
   conflict: boolean;
+  legacyConfiguration: boolean;
 }
 
 export interface CodexUninstallPlan {
@@ -44,9 +46,13 @@ function atomicWrite(path: string, content: string): void {
   renameSync(temporary, path);
 }
 
-function managedBlock(project: ProjectBinding, command: string): string {
-  const args = ["mcp", "--stdio", "--project-root", project.root].map((value) => JSON.stringify(value)).join(", ");
-  return `${MANAGED_BEGIN}\n[mcp_servers.polarbear-memory]\ncommand = ${JSON.stringify(command)}\nargs = [${args}]\nrequired = true\n${MANAGED_END}`;
+function launchSpec(project: ProjectBinding, runtime: AgentRuntime): AgentLaunchSpec {
+  return buildPolarbearLaunchSpec(runtime, ["mcp", "--stdio", "--project-root", project.root]);
+}
+
+function managedBlock(spec: AgentLaunchSpec): string {
+  const args = spec.args.map((value) => JSON.stringify(value)).join(", ");
+  return `${MANAGED_BEGIN}\n[mcp_servers.polarbear-memory]\ncommand = ${JSON.stringify(spec.command)}\nargs = [${args}]\nrequired = true\n${MANAGED_END}`;
 }
 
 function managedRange(content: string): { start: number; end: number } | null {
@@ -67,11 +73,59 @@ function managedRange(content: string): { start: number; end: number } | null {
   return { start, end };
 }
 
-function desiredConfig(existing: string | null, project: ProjectBinding, command: string): string {
-  const block = `${managedBlock(project, command)}\n`;
+function serverRange(content: string): { start: number; end: number; body: string } | null {
+  const match = SERVER_HEADER.exec(content);
+  if (!match || match.index === undefined) return null;
+  const start = match.index;
+  const afterHeader = start + match[0].length;
+  const nextHeader = /^\s*\[[^\n]+\]\s*(?:#.*)?$/gmu;
+  nextHeader.lastIndex = afterHeader;
+  const next = nextHeader.exec(content);
+  const end = next?.index ?? content.length;
+  return { start, end, body: content.slice(start, end) };
+}
+
+function parseTomlString(value: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "string" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseLaunchSpec(body: string): AgentLaunchSpec | undefined {
+  const commandMatch = /^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*(?:#.*)?$/mu.exec(body);
+  const argsMatch = /^\s*args\s*=\s*(\[[\s\S]*?\])\s*(?:#.*)?$/mu.exec(body);
+  if (!commandMatch?.[1] || !argsMatch?.[1]) return undefined;
+  const command = parseTomlString(commandMatch[1]);
+  try {
+    const args: unknown = JSON.parse(argsMatch[1]);
+    if (command === undefined || !Array.isArray(args) || !args.every((value) => typeof value === "string")) return undefined;
+    return { command, args } as AgentLaunchSpec;
+  } catch {
+    return undefined;
+  }
+}
+
+function legacyServer(content: string, project: ProjectBinding): { start: number; end: number } | null {
+  const range = serverRange(content);
+  if (!range) return null;
+  const spec = parseLaunchSpec(range.body);
+  if (!spec || spec.command !== "polarbear-memory") return null;
+  const expected = ["mcp", "--stdio", "--project-root", project.root];
+  return spec.args.length === expected.length && spec.args.every((value, index) => value === expected[index])
+    ? { start: range.start, end: range.end }
+    : null;
+}
+
+function desiredConfig(existing: string | null, project: ProjectBinding, spec: AgentLaunchSpec): string {
+  const block = `${managedBlock(spec)}\n`;
   if (existing === null || existing.trim() === "") return block;
   const range = managedRange(existing);
   if (range) return `${existing.slice(0, range.start)}${block}${existing.slice(range.end)}`;
+  const legacy = legacyServer(existing, project);
+  if (legacy) return `${existing.slice(0, legacy.start)}${block}${existing.slice(legacy.end)}`;
   if (SERVER_HEADER.test(existing)) {
     throw new Error("Codex already has an unmanaged `polarbear-memory` MCP server. Remove or rename it before installing.");
   }
@@ -94,33 +148,45 @@ function backup(project: ProjectBinding, current: string | null, category: "code
   return backupDir;
 }
 
-export function planCodexIntegration(project: ProjectBinding, command = "polarbear-memory"): CodexIntegrationPlan {
+export function planCodexIntegration(project: ProjectBinding, runtime: AgentRuntime = resolveAgentRuntime()): CodexIntegrationPlan {
   const configPath = assertSafeConfigPath(project.root);
   const current = existsSync(configPath) ? readFileSync(configPath, "utf8") : null;
   const range = current === null ? null : managedRange(current);
-  const conflict = range === null && current !== null && SERVER_HEADER.test(current);
+  const legacyConfiguration = range === null && current !== null && legacyServer(current, project) !== null;
+  const conflict = range === null && current !== null && !legacyConfiguration && SERVER_HEADER.test(current);
+  const spec = launchSpec(project, runtime);
   return {
     configPath,
     backupRequired: current !== null,
-    alreadyInstalled: !conflict && current !== null && current === desiredConfig(current, project, command),
+    alreadyInstalled: !conflict && current !== null && current === desiredConfig(current, project, spec),
     conflict,
+    legacyConfiguration,
   };
 }
 
 export function installCodexIntegration(
   project: ProjectBinding,
-  options: { dryRun: boolean; command?: string },
+  options: { dryRun: boolean; runtime?: AgentRuntime },
 ): { plan: CodexIntegrationPlan; backupDir?: string } {
-  const command = options.command ?? "polarbear-memory";
-  const plan = planCodexIntegration(project, command);
+  const runtime = options.runtime ?? resolveAgentRuntime();
+  const plan = planCodexIntegration(project, runtime);
   if (plan.conflict) {
     throw new Error("Codex already has an unmanaged `polarbear-memory` MCP server. Remove or rename it before installing.");
   }
   if (options.dryRun || plan.alreadyInstalled) return { plan };
   const current = existsSync(plan.configPath) ? readFileSync(plan.configPath, "utf8") : null;
   const backupDir = backup(project, current, "codex");
-  atomicWrite(plan.configPath, desiredConfig(current, project, command));
+  atomicWrite(plan.configPath, desiredConfig(current, project, launchSpec(project, runtime)));
   return { plan, backupDir };
+}
+
+export function readCodexLaunchSpec(project: ProjectBinding): AgentLaunchSpec | undefined {
+  const path = assertSafeConfigPath(project.root);
+  if (!existsSync(path)) return undefined;
+  const content = readFileSync(path, "utf8");
+  const managed = managedRange(content);
+  const body = managed ? content.slice(managed.start, managed.end) : serverRange(content)?.body;
+  return body ? parseLaunchSpec(body) : undefined;
 }
 
 export function uninstallCodexIntegration(

@@ -61,7 +61,7 @@ try {
     if (!existsSync(join(demoDirectory, relativePath))) throw new Error(`installed CLI did not create ${relativePath}.`);
   }
   const doctor = run(executable, ["doctor"], demoDirectory, memoryEnvironment);
-  if (!/Claude MCP\s+OK/u.test(doctor) || !/Codex MCP\s+OK/u.test(doctor)) {
+  if (!/Claude MCP handshake\s+OK/u.test(doctor) || !/Codex MCP\s+handshake\s+OK/u.test(doctor)) {
     throw new Error("installed CLI doctor did not confirm both Agent integrations.");
   }
   const savings = run(executable, ["savings"], demoDirectory, memoryEnvironment);

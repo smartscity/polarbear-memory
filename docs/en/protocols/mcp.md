@@ -27,18 +27,26 @@ It initializes the project when needed and configures every currently supported 
 - Claude Code: `.mcp.json`, Agent rules, and lifecycle hooks;
 - Codex: project-scoped `.codex/config.toml` and MCP server instructions.
 
-Restart active Agent clients after installation. Existing unrelated configuration is preserved, and managed changes are backed up. Use `polarbear-memory install --dry-run` for a non-mutating preview.
+Restart active Agent clients after installation. Existing unrelated configuration is preserved, managed changes are backed up, and legacy PATH-based Polarbear entries are migrated automatically. Re-run the installer after moving or upgrading the active runtime. Use `polarbear-memory install --dry-run` for a non-mutating preview.
 
 Other MCP-compatible clients can configure the same stdio server manually:
 
 ```json
 {
-  "command": "polarbear-memory",
-  "args": ["mcp", "--stdio", "--project-root", "/absolute/path/to/repository"]
+  "command": "/absolute/path/to/the/current/node-runtime",
+  "args": [
+    "/absolute/path/to/polarbear-memory/dist/cli.js",
+    "mcp",
+    "--stdio",
+    "--project-root",
+    "/absolute/path/to/repository"
+  ]
 }
 ```
 
-The client launches this process. A user does not normally run `polarbear-memory mcp --stdio` in a terminal or invoke the MCP tools manually.
+The runtime and CLI paths must belong to the same working Polarbear installation. The supported installers derive both paths from the running Polarbear process; they do not search shell profiles, runtime managers, or `PATH`. The client launches this process. A user does not normally run `polarbear-memory mcp --stdio` in a terminal or invoke the MCP tools manually.
+
+`polarbear-memory doctor` checks configuration freshness, runtime and CLI existence, and an MCP initialization handshake using a minimal environment. A stale or missing runtime is a failure even when the configuration entry exists.
 
 ## Default tool groups
 

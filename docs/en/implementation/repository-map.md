@@ -14,7 +14,7 @@
 | `src/protocol-mcp/` | Agent-facing MCP adapter |
 | `src/protocol-local/` | Local Admin API transport and router |
 | `src/cli/` and `src/cli.ts` | Human-facing command adapter |
-| `src/platform/` | Git, project identity, and file-anchor integration |
+| `src/platform/` | Git, project identity, file anchors, and deterministic Agent process launch |
 | `src/security/` | Redaction and trust-boundary helpers |
 | `api/` | Versioned Admin API contract and DTO source |
 | `fixtures/` | Deterministic benchmark and security fixtures |
@@ -39,6 +39,7 @@
 | Schema/migration | `src/storage/schema-v2.ts` | `architecture/memory-engine.md` |
 | Context selection | `src/application/context-planner.ts` | `architecture/context-os.md` |
 | Rotation/runtime | `src/runtime/`, `src/adapters/` | `architecture/context-os.md` |
+| Generated Agent launch | `src/platform/agent-launch.ts`, `src/adapters/` | `architecture/overview.md`, `protocols/mcp.md` |
 | MCP tool | `src/protocol-mcp/` | `protocols/mcp.md` |
 | Admin method/DTO | `api/`, `src/protocol-local/` | `protocols/admin-api.md` |
 | CLI behavior | `src/cli.ts`, `src/cli/` | relevant guide only |

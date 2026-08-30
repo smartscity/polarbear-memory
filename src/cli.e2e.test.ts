@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -44,8 +44,8 @@ function run(command: string, args: string[], cwd: string, dataDir?: string, inp
 
 test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "polarbear-memory-cli-"));
-  const repository = join(temporary, "repo");
-  const dataDir = join(temporary, "data");
+  const repository = join(temporary, "repo with spaces");
+  const dataDir = join(temporary, "data with spaces");
   const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
   const denyNetwork = fileURLToPath(new URL("./test/deny-network.js", import.meta.url));
   const fixture = resolve("fixtures/resume-basic/fixture.json");
@@ -60,7 +60,11 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(installed.stdout, /Project\s+INITIALIZED/u);
     assert.match(installed.stdout, /Claude Code\s+INSTALLED/u);
     assert.match(installed.stdout, /Codex\s+INSTALLED/u);
-    assert.ok(existsSync(join(repository, ".codex", "config.toml")));
+    const codexConfigPath = join(repository, ".codex", "config.toml");
+    assert.ok(existsSync(codexConfigPath));
+    const generatedCodexConfig = readFileSync(codexConfigPath, "utf8");
+    assert.match(generatedCodexConfig, new RegExp(`command = ${JSON.stringify(process.execPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+    assert.doesNotMatch(generatedCodexConfig, /command = "polarbear-memory"/u);
     const maintenancePreview = run(process.execPath, offline(["maintain", "--dry-run"]), repository, dataDir);
     assert.match(maintenancePreview.stdout, /"policyVersion": "mvp3-v1"/);
     const recorded = run(process.execPath, [
@@ -114,8 +118,21 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assertNoUnexpectedStderr(hookEnd.stderr);
     assert.match(run(process.execPath, offline(["search", "automatic decision"]), repository, dataDir).stdout, /automatic hook decision/);
     const doctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
-    assert.match(doctor.stdout, /Claude MCP\s+OK/);
-    assert.match(doctor.stdout, /Codex MCP\s+OK/);
+    assert.match(doctor.stdout, /Claude MCP config\s+OK/u);
+    assert.match(doctor.stdout, /Claude MCP handshake\s+OK/u);
+    assert.match(doctor.stdout, /Codex MCP\s+config\s+OK/u);
+    assert.match(doctor.stdout, /Codex MCP\s+handshake\s+OK/u);
+
+    writeFileSync(codexConfigPath, generatedCodexConfig.replace(
+      `command = ${JSON.stringify(process.execPath)}`,
+      'command = "/nonexistent/polarbear-runtime/node"',
+    ));
+    const staleDoctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
+    assert.match(staleDoctor.stdout, /Codex MCP\s+config\s+STALE/u);
+    assert.match(staleDoctor.stdout, /Codex MCP\s+executable\s+FAILED/u);
+    assert.match(staleDoctor.stdout, /polarbear-memory install/u);
+    assert.match(run(process.execPath, offline(["codex", "install"]), repository, dataDir).stdout, /Codex integration installed/u);
+    assert.match(readFileSync(codexConfigPath, "utf8"), new RegExp(JSON.stringify(process.execPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     const diagnostics = run(process.execPath, offline(["doctor", "--export"]), repository, dataDir);
     assert.match(diagnostics.stdout, /contain no Memory content/);
     const diagnosticsPath = /Diagnostics\s+(.+\.json)/u.exec(diagnostics.stdout)?.[1]?.trim();

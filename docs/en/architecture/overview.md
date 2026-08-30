@@ -39,6 +39,12 @@ runtime adapters implement AgentRuntime
 
 The domain layer does not depend on SQLite, MCP, HTTP, CLI, Codex, or Claude Code.
 
+## Agent launch invariant
+
+Every generated Agent integration is self-contained and executable without interactive-shell initialization. Installers derive the absolute runtime executable from the current process and the absolute CLI artifact from the active Polarbear package. Structured integrations store the executable and argv separately; command-only hook formats use platform-aware quoting.
+
+Generated launch commands must not search shell profiles, invoke a login shell, detect a runtime manager, assume a Node version or installation layout, or depend on the Agent host reproducing the installer's `PATH`. This invariant applies to MCP clients, lifecycle hooks, desktop Agents, IDE integrations, and future adapters. Doctor verifies the stored launch path and performs an MCP handshake with a minimal environment.
+
 ## Durable and derived state
 
 Canonical state includes project identity, evidence, knowledge, versions, relations, tasks, checkpoints, sessions, runs, observations, and usage records.
@@ -51,6 +57,7 @@ FTS documents and search indexes are derived. They can be rebuilt and must not b
 - External event payloads are validated, bounded, and redacted before persistence.
 - Raw prompts, secrets, tokens, cookies, and complete environment variables are not durable Memory.
 - Provider CLIs are separate processes launched with argument arrays and `shell: false`.
+- Generated Agent integrations use deterministic absolute runtime and package entrypoint paths.
 - The Engine performs no implicit telemetry, remote rendering, or default network access.
 
 ## Detailed designs

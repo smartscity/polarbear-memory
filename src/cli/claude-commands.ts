@@ -3,6 +3,7 @@ import { installClaudeIntegration, restoreLatestClaudeIntegration } from "../ada
 import { discoverGitContext } from "../platform/git.js";
 import { loadProject } from "../platform/project.js";
 import { CLAUDE_HOOK_EVENTS } from "../adapters/claude-code/hooks.js";
+import { resolveAgentRuntime } from "../platform/agent-launch.js";
 
 export function runClaudeCommand(cwd: string, args: string[]): void {
   const [action, ...rest] = args;
@@ -10,12 +11,12 @@ export function runClaudeCommand(cwd: string, args: string[]): void {
   if (action === "install") {
     const parsed = parseArgs({
       args: rest,
-      options: { "dry-run": { type: "boolean", default: false }, command: { type: "string" } },
+      options: { "dry-run": { type: "boolean", default: false } },
       strict: true,
     });
     const result = installClaudeIntegration(project, {
       dryRun: parsed.values["dry-run"],
-      ...(parsed.values.command ? { command: parsed.values.command } : {}),
+      runtime: resolveAgentRuntime(),
     });
     console.log(`MCP config: ${result.plan.mcpPath}`);
     console.log(`Rule:       ${result.plan.rulePath}`);
@@ -24,6 +25,7 @@ export function runClaudeCommand(cwd: string, args: string[]): void {
     else if (parsed.values["dry-run"]) console.log("Dry run only; no files were changed.");
     else {
       console.log(`Backup:     ${result.backupDir}`);
+      if (result.plan.legacyConfiguration) console.log("Legacy Claude configuration detected and updated.");
       console.log("Claude Code integration installed. Approve the project MCP server when Claude prompts.");
     }
     return;

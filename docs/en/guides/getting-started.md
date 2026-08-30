@@ -45,7 +45,7 @@ After a safe checkpoint, close the current session and start a fresh one when th
 polarbear-memory doctor
 ```
 
-Both `Claude MCP` and `Codex MCP` should report `OK` after installation.
+For both `Claude MCP` and `Codex MCP`, the config, executable, and handshake lines should report `OK`. If a runtime upgrade makes an absolute path stale, run `polarbear-memory install` again to repair every supported Agent, or `polarbear-memory codex install` to repair Codex only.
 
 ## Next
 

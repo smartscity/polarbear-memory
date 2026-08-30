@@ -5,6 +5,7 @@ import { installCodexIntegration, planCodexIntegration } from "../adapters/codex
 import { discoverGitContext } from "../platform/git.js";
 import { planProject, writeProjectConfig } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { resolveAgentRuntime } from "../platform/agent-launch.js";
 
 function status(alreadyInstalled: boolean, dryRun: boolean): string {
   if (alreadyInstalled) return "ALREADY INSTALLED";
@@ -14,15 +15,15 @@ function status(alreadyInstalled: boolean, dryRun: boolean): string {
 export function runInstallCommand(cwd: string, args: string[]): void {
   const parsed = parseArgs({
     args,
-    options: { "dry-run": { type: "boolean", default: false }, command: { type: "string" } },
+    options: { "dry-run": { type: "boolean", default: false } },
     strict: true,
   });
   const project = planProject(discoverGitContext(cwd));
   const projectInitialized = existsSync(project.configPath);
-  const command = parsed.values.command ?? "polarbear-memory";
+  const runtime = resolveAgentRuntime();
 
-  const claudePlan = planClaudeIntegration(project, command);
-  const codexPlan = planCodexIntegration(project, command);
+  const claudePlan = planClaudeIntegration(project, runtime);
+  const codexPlan = planCodexIntegration(project, runtime);
   if (codexPlan.conflict) {
     throw new Error("Codex already has an unmanaged `polarbear-memory` MCP server. Remove or rename it before installing.");
   }
@@ -37,13 +38,16 @@ export function runInstallCommand(cwd: string, args: string[]): void {
     }
   }
 
-  installClaudeIntegration(project, { dryRun: parsed.values["dry-run"], command });
-  installCodexIntegration(project, { dryRun: parsed.values["dry-run"], command });
+  installClaudeIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
+  installCodexIntegration(project, { dryRun: parsed.values["dry-run"], runtime });
 
   console.log(`Project      ${projectInitialized ? "ALREADY INITIALIZED" : parsed.values["dry-run"] ? "WOULD INITIALIZE" : "INITIALIZED"}`);
   console.log("Agent integrations");
   console.log(`Claude Code  ${status(claudePlan.alreadyInstalled, parsed.values["dry-run"])}`);
   console.log(`Codex        ${status(codexPlan.alreadyInstalled, parsed.values["dry-run"])}`);
+  if (claudePlan.legacyConfiguration || codexPlan.legacyConfiguration) {
+    console.log("Legacy Agent configuration detected; runtime launch commands were updated.");
+  }
   if (parsed.values["dry-run"]) {
     console.log("\nDry run only; no files were changed.");
   } else if (claudePlan.alreadyInstalled && codexPlan.alreadyInstalled) {

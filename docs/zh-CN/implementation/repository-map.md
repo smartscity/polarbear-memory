@@ -14,7 +14,7 @@
 | `src/protocol-mcp/` | Agent-facing MCP adapter |
 | `src/protocol-local/` | 本地 Admin API transport/router |
 | `src/cli/`、`src/cli.ts` | 人类 CLI adapter |
-| `src/platform/` | Git、Project identity 和 file anchor |
+| `src/platform/` | Git、Project identity、file anchor 和确定性 Agent process launch |
 | `src/security/` | 脱敏和信任边界 |
 | `api/` | Admin API 合同与 DTO 源 |
 | `fixtures/` | benchmark 与安全 fixture |
@@ -39,6 +39,7 @@
 | Schema/migration | `src/storage/schema-v2.ts` | `architecture/memory-engine.md` |
 | Context selection | `src/application/context-planner.ts` | `architecture/context-os.md` |
 | Rotation/runtime | `src/runtime/`、`src/adapters/` | `architecture/context-os.md` |
+| 生成的 Agent launch | `src/platform/agent-launch.ts`、`src/adapters/` | `architecture/overview.md`、`protocols/mcp.md` |
 | MCP tool | `src/protocol-mcp/` | `protocols/mcp.md` |
 | Admin method/DTO | `api/`、`src/protocol-local/` | `protocols/admin-api.md` |
 | CLI 行为 | `src/cli.ts`、`src/cli/` | 对应 guide |

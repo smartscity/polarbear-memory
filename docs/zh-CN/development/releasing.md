@@ -28,6 +28,8 @@ npm pack --dry-run
 
 Package audit 负责发布白名单，不要只依赖 `.gitignore` 或 `.npmignore`。
 
+CI 还会使用最低支持的 Node 24 版本和最新支持的 Node 26 版本，在 macOS、Linux 与 Windows 上运行 Agent integration suite，覆盖结构化 launch 生成、旧配置迁移、带空格路径、最小 PATH 下的 MCP 启动以及 doctor 修复诊断。
+
 ## npm 发布
 
 只从已评审且 tag 与 package version 一致的 commit 发布：

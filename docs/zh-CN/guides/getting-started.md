@@ -45,7 +45,7 @@ polarbear-memory install
 polarbear-memory doctor
 ```
 
-安装完成后，`Claude MCP` 和 `Codex MCP` 都应显示 `OK`。
+安装完成后，`Claude MCP` 和 `Codex MCP` 的 config、executable 与 handshake 都应显示 `OK`。如果 runtime 升级导致绝对路径过期，重新运行 `polarbear-memory install` 可修复所有受支持的 Agent；只修复 Codex 时可运行 `polarbear-memory codex install`。
 
 ## 下一步
 

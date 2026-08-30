@@ -11,6 +11,7 @@ import { planClaudeIntegration, uninstallClaudeIntegration } from "./adapters/cl
 import { uninstallCodexIntegration } from "./adapters/codex/integration.js";
 import { runClaudeCommand, runHookCommand, runSpoolCommand } from "./cli/claude-commands.js";
 import { runInstallCommand } from "./cli/install-command.js";
+import { runCodexCommand } from "./cli/codex-commands.js";
 import {
   complete, context, doctor, feedback, forget, get, maintain,
   record, relate, restore, savings, search, status, verify,
@@ -55,8 +56,9 @@ Usage:
   polarbear-memory doctor [--export]
   polarbear-memory mcp --stdio [--project-root PATH] [--admin-tools]
   polarbear-memory service run
-  polarbear-memory claude install [--dry-run] [--command EXECUTABLE]
+  polarbear-memory claude install [--dry-run]
   polarbear-memory claude restore
+  polarbear-memory codex install [--dry-run]
   polarbear-memory hook ingest --event SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd
   polarbear-memory spool replay
   polarbear-memory rebuild-index
@@ -262,6 +264,7 @@ async function main(): Promise<void> {
       return serveAdminApi();
     }
     case "claude": return runClaudeCommand(cwd, args);
+    case "codex": return runCodexCommand(cwd, args);
     case "hook": return runHookCommand(cwd, args);
     case "spool": return runSpoolCommand(cwd, args);
     default: throw new Error(`Unknown command: ${command}\n\n${usage()}`);
