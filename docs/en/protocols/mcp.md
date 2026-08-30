@@ -15,23 +15,21 @@ Do not copy their complete JSON schemas into this document.
 
 ## Connect an Agent
 
-Initialize Polarbear Memory in the target repository before connecting a client:
+Run the unified installer in the target repository:
 
 ```bash
 cd /path/to/repository
-polarbear-memory init
+polarbear-memory install
 ```
 
-For Claude Code, install the managed MCP configuration, Agent rules, and lifecycle hooks once:
+It initializes the project when needed and configures every currently supported Agent integration in one pass:
 
-```bash
-polarbear-memory claude install --dry-run
-polarbear-memory claude install
-```
+- Claude Code: `.mcp.json`, Agent rules, and lifecycle hooks;
+- Codex: project-scoped `.codex/config.toml` and MCP server instructions.
 
-Restart Claude Code after installation. The integration merges supported existing configuration and creates a backup before changing managed files.
+Restart active Agent clients after installation. Existing unrelated configuration is preserved, and managed changes are backed up. Use `polarbear-memory install --dry-run` for a non-mutating preview.
 
-For Codex or another MCP-compatible client, add this stdio server to the client's project configuration:
+Other MCP-compatible clients can configure the same stdio server manually:
 
 ```json
 {
@@ -47,7 +45,7 @@ The client launches this process. A user does not normally run `polarbear-memory
 | Group | Tools |
 |---|---|
 | Legacy-compatible Memory | `memory_context`, `memory_get`, `memory_search`, `memory_record`, `memory_verify` |
-| Context OS | `context_get`, `context_explain`, `task_get`, `task_checkpoint`, `decision_record`, `constraint_record`, `memory_feedback` |
+| Context OS | `context_get`, `context_explain`, `task_create`, `task_get`, `task_checkpoint`, `decision_record`, `constraint_record`, `memory_feedback` |
 
 When `--admin-tools` is explicitly enabled, the server also exposes `memory_status` and reversible `memory_forget`.
 
@@ -65,7 +63,7 @@ When `--admin-tools` is explicitly enabled, the server also exposes `memory_stat
 
 This workflow is performed by the Agent integration, not by the user during normal work:
 
-1. Obtain or create a durable Task through the Agent integration or Admin API.
+1. Obtain a durable Task or create one with `task_create`.
 2. Call `context_get` with the Task ID and current request.
 3. Use Memory IDs for progressive expansion through `memory_get`.
 4. Record durable decisions and constraints explicitly.

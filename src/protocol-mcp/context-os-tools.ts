@@ -49,6 +49,22 @@ export function registerContextOsTools(server: McpServer, store: MemoryStore, pr
     }
   });
 
+  server.registerTool("task_create", {
+    title: "Create a durable task",
+    description: "Create the durable objective used to continue substantive work across Agent sessions.",
+    inputSchema: z.object({
+      title: z.string().min(1).max(2_048), objective: z.string().min(1).max(8_192),
+      phase: z.enum(TASK_PHASES).default("DISCOVERY"), priority: z.number().int().min(0).max(1_000).default(500),
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ title, objective, phase, priority }) => {
+    try {
+      return json(store.contextOs().createTask(project.id, { title, objective, phase, priority }));
+    } catch (error) {
+      return safeError(error);
+    }
+  });
+
   server.registerTool("task_get", {
     title: "Get durable task state",
     description: "Return a first-class Task and its latest checkpoint reference, independent of provider sessions.",

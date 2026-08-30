@@ -15,23 +15,21 @@ MCP 是 Agent-facing 兼容接口。它通过 stdio 暴露 Memory 与 Context OS
 
 ## 接入 Agent
 
-连接客户端前，先在目标仓库初始化 Polarbear Memory：
+在目标仓库运行统一安装器：
 
 ```bash
 cd /path/to/repository
-polarbear-memory init
+polarbear-memory install
 ```
 
-Claude Code 需要一次性安装托管的 MCP 配置、Agent rules 和 lifecycle hooks：
+它会在需要时初始化项目，并一次配置当前支持的全部 Agent 集成：
 
-```bash
-polarbear-memory claude install --dry-run
-polarbear-memory claude install
-```
+- Claude Code：`.mcp.json`、Agent rules 和 lifecycle hooks；
+- Codex：项目级 `.codex/config.toml` 和 MCP server instructions。
 
-安装后重启 Claude Code。集成会合并受支持的现有配置，并在修改托管文件前创建备份。
+安装后重启正在运行的 Agent 客户端。安装器保留无关配置，并备份托管修改。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
 
-Codex 或其他兼容 MCP 的客户端，需要在项目配置中添加以下 stdio server：
+其他兼容 MCP 的客户端可手动配置同一个 stdio server：
 
 ```json
 {
@@ -47,7 +45,7 @@ Codex 或其他兼容 MCP 的客户端，需要在项目配置中添加以下 st
 | 分组 | 工具 |
 |---|---|
 | 兼容 Memory | `memory_context`、`memory_get`、`memory_search`、`memory_record`、`memory_verify` |
-| Context OS | `context_get`、`context_explain`、`task_get`、`task_checkpoint`、`decision_record`、`constraint_record`、`memory_feedback` |
+| Context OS | `context_get`、`context_explain`、`task_create`、`task_get`、`task_checkpoint`、`decision_record`、`constraint_record`、`memory_feedback` |
 
 显式启用 `--admin-tools` 时，额外提供 `memory_status` 和可逆的 `memory_forget`。
 
@@ -65,7 +63,7 @@ Codex 或其他兼容 MCP 的客户端，需要在项目配置中添加以下 st
 
 以下工作流由 Agent 集成执行，不是用户日常需要手动完成的操作：
 
-1. 通过 Agent 集成或 Admin API 获取、创建 durable Task。
+1. 获取 durable Task，或通过 `task_create` 创建。
 2. 使用 Task ID 和当前请求调用 `context_get`。
 3. 通过 `memory_get` 渐进展开 Memory。
 4. 显式记录 durable decision 与 constraint。

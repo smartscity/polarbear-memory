@@ -4,54 +4,52 @@
 
 ## 环境要求
 
-- `package.json` 声明范围内的 Node.js；
+- Node.js `>=24.10.0 <27`；
 - npm；
 - Git 仓库；
-- 只有需要对应 provider 集成时才需要 Codex 或 Claude Code。
+- Codex 或 Claude Code。
 
-## 安装
+## 1. 安装 CLI
 
 ```bash
 npm install --global polarbear-memory
-polarbear-memory --version
 ```
 
-## 初始化仓库
+## 2. 在项目中安装 Polarbear Memory
+
+进入目标仓库，运行统一安装器：
 
 ```bash
 cd /path/to/repository
-polarbear-memory init --dry-run
-polarbear-memory init
+polarbear-memory install
 ```
 
-初始化创建 `.polarbear/config.toml`。SQLite 数据库位于当前用户的 Polarbear 数据目录，不提交到仓库。
+这一个命令会：
 
-## 记录与检索 Memory
+- 在需要时初始化仓库和本地 SQLite 存储；
+- 配置 Claude Code MCP、Agent rules 和 lifecycle hooks；
+- 配置项目级 Codex MCP 和 server instructions；
+- 保留无关配置，并在修改托管文件前创建备份。
 
-```bash
-polarbear-memory record \
-  --type DECISION \
-  --summary "Use the local Admin API" \
-  --content "Desktop must never open memory.db directly"
+安装后重启正在运行的 Agent 客户端。可以先运行 `polarbear-memory install --dry-run` 进行无修改预览。
 
-polarbear-memory search "Desktop database boundary"
-polarbear-memory context --task "continue Desktop integration" --budget 1000
-```
+## 3. 正常工作
 
-完整命令面以 `polarbear-memory --help` 为准，本文只维护常用工作流。
+像平时一样使用 Agent。MCP 工具和 lifecycle hooks 会取得有限上下文、保存可复用知识，并为实质性工作创建 checkpoint。这些是 Agent-facing 操作，正常使用时不需要用户手动调用。
 
-## 启用 MCP
+保存安全 checkpoint 后，可以在对话变大时关闭当前 session。新 session 从持久任务状态和筛选后的 Memory 继续，不需要携带完整旧对话。
 
-一次性接入 Claude Code、Codex 或其他兼容 MCP 的 Agent，之后即可正常使用 Agent。安装命令、客户端配置、工具分组和安全规则统一由 [MCP 接入与协议文档](../protocols/mcp.md) 维护。
-
-## 验证与维护
+## 验证
 
 ```bash
-polarbear-memory verify MEMORY_ID --result VERIFIED --reason "Confirmed by current code and tests"
-polarbear-memory maintain --dry-run
-polarbear-memory maintain
 polarbear-memory doctor
-polarbear-memory backup create
 ```
 
-长期知识不会仅因为时间久被静默 purge。下一步可阅读 [Context OS 工作流](./context-os.md) 和 [运维与恢复](./operations.md)。
+安装完成后，`Claude MCP` 和 `Codex MCP` 都应显示 `OK`。
+
+## 下一步
+
+- [MCP 接入与 Agent 工作流](../protocols/mcp.md)
+- [Context OS 工作流](./context-os.md)
+- [Memory Engine 设计](../architecture/memory-engine.md)
+- [运维与恢复](./operations.md)

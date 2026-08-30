@@ -4,60 +4,52 @@
 
 ## Requirements
 
-- Node.js in the range declared by `package.json`;
+- Node.js `>=24.10.0 <27`;
 - npm;
 - a Git repository;
-- Codex or Claude Code only if you want the corresponding provider integration.
+- Codex or Claude Code.
 
-## Install
+## 1. Install the CLI
 
 ```bash
 npm install --global polarbear-memory
-polarbear-memory --version
 ```
 
-## Initialize a repository
+## 2. Install Polarbear Memory in a project
+
+Run the unified installer from the target repository:
 
 ```bash
 cd /path/to/repository
-polarbear-memory init --dry-run
-polarbear-memory init
+polarbear-memory install
 ```
 
-Initialization creates `.polarbear/config.toml`. The SQLite database is stored in the current user's Polarbear data directory, not committed to the repository.
+This single command:
 
-## Record and retrieve Memory
+- initializes the repository and local SQLite storage when needed;
+- configures Claude Code MCP, Agent rules, and lifecycle hooks;
+- configures project-scoped Codex MCP and server instructions;
+- preserves unrelated configuration and backs up files before managed changes.
 
-```bash
-polarbear-memory record \
-  --type DECISION \
-  --summary "Use the local Admin API" \
-  --content "Desktop must never open memory.db directly"
+Restart active Agent clients after installation. Use `polarbear-memory install --dry-run` to preview without changing files.
 
-polarbear-memory search "Desktop database boundary"
-polarbear-memory context --task "continue Desktop integration" --budget 1000
-```
+## 3. Work normally
 
-Use `polarbear-memory --help` for the complete current command surface. The CLI help is authoritative; this guide shows only common workflows.
+Use the Agent as usual. MCP tools and lifecycle hooks retrieve bounded context, preserve reusable knowledge, and checkpoint substantive work. They are Agent-facing operations; users do not invoke them manually during normal work.
 
-## Enable MCP
+After a safe checkpoint, close the current session and start a fresh one when the conversation becomes large. The new session resumes from durable task state and selected Memory rather than the complete old conversation.
 
-Connect Claude Code, Codex, or another MCP-compatible Agent once, then use the Agent normally. See [MCP setup and protocol](../protocols/mcp.md) for the owned setup commands, client configuration, tool groups, and safety rules.
-
-## Verify and maintain
+## Verify
 
 ```bash
-polarbear-memory verify MEMORY_ID --result VERIFIED --reason "Confirmed by current code and tests"
-polarbear-memory maintain --dry-run
-polarbear-memory maintain
 polarbear-memory doctor
-polarbear-memory backup create
 ```
 
-Maintenance never silently purges durable knowledge merely because it is old. See [Operations](./operations.md).
+Both `Claude MCP` and `Codex MCP` should report `OK` after installation.
 
 ## Next
 
+- [MCP setup and Agent workflow](../protocols/mcp.md)
 - [Context OS workflow](./context-os.md)
 - [Memory Engine design](../architecture/memory-engine.md)
-- [Troubleshooting and recovery](./operations.md)
+- [Operations and recovery](./operations.md)

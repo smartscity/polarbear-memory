@@ -8,7 +8,9 @@ import { compileContext } from "./application/context.js";
 import { runMaintenance } from "./application/maintenance.js";
 import { runBenchmark } from "./application/benchmark.js";
 import { planClaudeIntegration, uninstallClaudeIntegration } from "./adapters/claude-code/integration.js";
+import { uninstallCodexIntegration } from "./adapters/codex/integration.js";
 import { runClaudeCommand, runHookCommand, runSpoolCommand } from "./cli/claude-commands.js";
+import { runInstallCommand } from "./cli/install-command.js";
 import {
   complete, context, doctor, feedback, forget, get, maintain,
   record, relate, restore, savings, search, status, verify,
@@ -28,6 +30,7 @@ function usage(): string {
   return `Polarbear Memory ${VERSION}
 
 Usage:
+  polarbear-memory install [--dry-run]
   polarbear-memory init [--dry-run]
   polarbear-memory record --type TYPE --summary TEXT [--content TEXT] [--file PATH...]
   polarbear-memory search QUERY [--limit N]
@@ -179,11 +182,14 @@ function uninstall(cwd: string, args: string[]): void {
   if (parsed.values["keep-data"] && parsed.values["delete-data"]) throw new Error("Choose either --keep-data or --delete-data.");
   const project = loadProject(discoverGitContext(cwd));
   const result = uninstallClaudeIntegration(project, { dryRun: parsed.values["dry-run"] });
+  const codex = uninstallCodexIntegration(project, { dryRun: parsed.values["dry-run"] });
   console.log(`Claude MCP entry: ${result.plan.mcpEntry ? "remove" : "unchanged"}`);
   console.log(`Claude hooks: ${result.plan.hooks} managed entries to remove`);
   console.log(`Claude rule: ${result.plan.managedRule ? "remove" : result.plan.modifiedRulePreserved ? "preserve modified file" : "unchanged"}`);
+  console.log(`Codex MCP entry: ${codex.plan.managedEntry ? "remove" : "unchanged"}`);
   if (parsed.values["dry-run"]) return console.log("Dry run only; no files were changed.");
   if (result.backupDir) console.log(`Integration backup: ${result.backupDir}`);
+  if (codex.backupDir) console.log(`Codex integration backup: ${codex.backupDir}`);
   if (!parsed.values["delete-data"]) return console.log(`Project data preserved at ${project.dataDir}`);
   if (parsed.values.confirm !== project.id) {
     console.log(`Data deletion was not performed. Re-run with --delete-data --confirm ${project.id}`);
@@ -225,6 +231,7 @@ async function main(): Promise<void> {
   if (!command || command === "help" || command === "--help" || command === "-h") return console.log(usage());
   if (command === "--version" || command === "version") return console.log(VERSION);
   switch (command) {
+    case "install": return runInstallCommand(cwd, args);
     case "init": return init(cwd, args);
     case "record": return record(cwd, args);
     case "search": return search(cwd, args);

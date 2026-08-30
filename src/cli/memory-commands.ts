@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { compileContext } from "../application/context.js";
 import { runMaintenance } from "../application/maintenance.js";
 import { planClaudeIntegration } from "../adapters/claude-code/integration.js";
+import { planCodexIntegration } from "../adapters/codex/integration.js";
 import { parseMemoryType } from "../domain/memory.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 import { discoverGitContext, normalizeRepoFile } from "../platform/git.js";
@@ -305,6 +306,8 @@ export function doctor(cwd: string, args: string[]): void {
   console.log("Git          OK");
   const integration = planClaudeIntegration(project);
   console.log(`Claude MCP   ${integration.alreadyInstalled ? "OK" : "NOT INSTALLED"}`);
+  const codexIntegration = planCodexIntegration(project);
+  console.log(`Codex MCP    ${codexIntegration.alreadyInstalled ? "OK" : codexIntegration.conflict ? "CONFLICT" : "NOT INSTALLED"}`);
   console.log("Network      disabled by design");
   if (parsed.values.export) {
     const diagnosticsDirectory = join(project.dataDir, "diagnostics");
@@ -321,7 +324,11 @@ export function doctor(cwd: string, args: string[]): void {
       projectRef: createHash("sha256").update(project.id).digest("hex").slice(0, 16),
       repository: { branchPresent: Boolean(git.branch), headPresent: Boolean(git.head) },
       counts: statusCounts,
-      integrations: { claudeInstalled: planClaudeIntegration(project).alreadyInstalled },
+      integrations: {
+        claudeInstalled: planClaudeIntegration(project).alreadyInstalled,
+        codexInstalled: codexIntegration.alreadyInstalled,
+        codexConflict: codexIntegration.conflict,
+      },
       networkPolicy: "disabled",
     };
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
@@ -329,4 +336,3 @@ export function doctor(cwd: string, args: string[]): void {
     console.log("Diagnostics contain no Memory content, repository path, commit, branch name, environment, or database path.");
   }
 }
-

@@ -51,10 +51,11 @@ async function connected(includeAdminTools = false) {
 test("default MCP surface preserves Memory tools and adds Context OS tools", async () => {
   const { store, server, client } = await connected();
   try {
+    assert.match(client.getInstructions() ?? "", /task_checkpoint/u);
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       "constraint_record", "context_explain", "context_get", "decision_record", "memory_context", "memory_feedback",
-      "memory_get", "memory_record", "memory_search", "memory_verify", "task_checkpoint", "task_get",
+      "memory_get", "memory_record", "memory_search", "memory_verify", "task_checkpoint", "task_create", "task_get",
     ]);
     await assert.rejects(client.callTool({ name: "memory_status", arguments: {} }));
     const invalidBudget = await client.callTool({
@@ -99,10 +100,11 @@ test("default MCP surface preserves Memory tools and adds Context OS tools", asy
 test("Context OS MCP flow checkpoints a task and explains a bounded packet", async () => {
   const { store, server, client } = await connected();
   try {
-    const projectId = "33333333-3333-4333-8333-333333333333";
-    const task = store.contextOs().createTask(projectId, {
-      title: "Settlement retry", objective: "Implement and verify bounded settlement retry.", phase: "IMPLEMENTATION",
+    const created = await client.callTool({
+      name: "task_create",
+      arguments: { title: "Settlement retry", objective: "Implement and verify bounded settlement retry.", phase: "IMPLEMENTATION" },
     });
+    const task = JSON.parse(firstText(created)) as { id: string };
     const decision = await client.callTool({
       name: "decision_record",
       arguments: { task_id: task.id, summary: "Retry from reconciliation", rationale: "The terminal failure is asynchronous." },
@@ -135,7 +137,7 @@ test("admin MCP surface adds status and reversible forget only", async () => {
   const { store, server, client } = await connected(true);
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 14);
+    assert.equal(names.length, 15);
     assert.ok(names.includes("memory_status"));
     assert.ok(names.includes("memory_forget"));
 

@@ -52,10 +52,15 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
   const offline = (args: string[]) => ["--import", denyNetwork, cli, ...args];
   try {
     run("git", ["init", "-q", repository], temporary);
-    const dryRun = run(process.execPath, offline(["init", "--dry-run"]), repository, dataDir);
+    const dryRun = run(process.execPath, offline(["install", "--dry-run"]), repository, dataDir);
     assert.match(dryRun.stdout, /no files were changed/);
+    assert.equal(existsSync(join(repository, ".polarbear", "config.toml")), false);
 
-    run(process.execPath, offline(["init"]), repository, dataDir);
+    const installed = run(process.execPath, offline(["install"]), repository, dataDir);
+    assert.match(installed.stdout, /Project\s+INITIALIZED/u);
+    assert.match(installed.stdout, /Claude Code\s+INSTALLED/u);
+    assert.match(installed.stdout, /Codex\s+INSTALLED/u);
+    assert.ok(existsSync(join(repository, ".codex", "config.toml")));
     const maintenancePreview = run(process.execPath, offline(["maintain", "--dry-run"]), repository, dataDir);
     assert.match(maintenancePreview.stdout, /"policyVersion": "mvp3-v1"/);
     const recorded = run(process.execPath, [
@@ -91,9 +96,6 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(retentionSuite.stdout, /"kind": "retention-suite"/);
     assert.match(retentionSuite.stdout, /"canonicalAutoPurgeCount": 0/);
 
-    const claudeDryRun = run(process.execPath, offline(["claude", "install", "--dry-run"]), repository, dataDir);
-    assert.match(claudeDryRun.stdout, /no files were changed/);
-    run(process.execPath, offline(["claude", "install"]), repository, dataDir);
     const hookStop = run(process.execPath, offline(["hook", "ingest", "--event", "Stop"]), repository, dataDir, JSON.stringify({
       hook_event_name: "Stop",
       session_id: "cli-e2e-session",
@@ -113,6 +115,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(run(process.execPath, offline(["search", "automatic decision"]), repository, dataDir).stdout, /automatic hook decision/);
     const doctor = run(process.execPath, offline(["doctor"]), repository, dataDir);
     assert.match(doctor.stdout, /Claude MCP\s+OK/);
+    assert.match(doctor.stdout, /Codex MCP\s+OK/);
     const diagnostics = run(process.execPath, offline(["doctor", "--export"]), repository, dataDir);
     assert.match(diagnostics.stdout, /contain no Memory content/);
     const diagnosticsPath = /Diagnostics\s+(.+\.json)/u.exec(diagnostics.stdout)?.[1]?.trim();
@@ -136,7 +139,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const client = new Client({ name: "stdio-e2e", version: "1.0.0" });
     try {
       await client.connect(transport);
-      assert.equal((await client.listTools()).tools.length, 12);
+      assert.equal((await client.listTools()).tools.length, 13);
       const contextOverStdio = await client.callTool({
         name: "memory_context",
         arguments: { task: "settlement retry", budget: 400 },
@@ -152,7 +155,7 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const backupName = backupPath.split("/").at(-1) as string;
     assert.match(restorePreview.stdout, new RegExp(`--confirm ${backupName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
     assert.match(run(process.execPath, offline(["backup", "restore", backupPath, "--confirm", backupName]), repository, dataDir).stdout, /Previous database preserved/);
-    run(process.execPath, offline(["claude", "install"]), repository, dataDir);
+    run(process.execPath, offline(["install"]), repository, dataDir);
     assert.match(run(process.execPath, offline(["uninstall", "--dry-run"]), repository, dataDir).stdout, /Dry run only/);
     assert.match(run(process.execPath, offline(["uninstall", "--keep-data"]), repository, dataDir).stdout, /Project data preserved/);
   } finally {

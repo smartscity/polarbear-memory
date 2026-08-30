@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -27,7 +27,9 @@ try {
   const installDirectory = join(temporaryRoot, "install");
   const demoDirectory = join(temporaryRoot, "demo");
   const npmCache = join(temporaryRoot, "npm-cache");
+  const dataDirectory = join(temporaryRoot, "data");
   const nestedNpmEnvironment = { npm_config_cache: npmCache, npm_config_dry_run: "false" };
+  const memoryEnvironment = { POLARBEAR_MEMORY_DATA_DIR: dataDirectory };
   mkdirSync(packageDirectory);
   mkdirSync(installDirectory);
 
@@ -49,14 +51,24 @@ try {
   if (version !== expectedVersion) throw new Error(`installed CLI returned ${version}; package.json declares ${expectedVersion}.`);
 
   run("git", ["init", "--quiet", demoDirectory], temporaryRoot);
-  const dryRun = run(executable, ["init", "--dry-run"], demoDirectory);
-  if (!dryRun.includes("Dry run only; no files were changed.")) throw new Error("installed CLI init --dry-run did not complete.");
-  run(executable, ["init"], demoDirectory);
-  const savings = run(executable, ["savings"], demoDirectory);
+  const dryRun = run(executable, ["install", "--dry-run"], demoDirectory, memoryEnvironment);
+  if (!dryRun.includes("Dry run only; no files were changed.")) throw new Error("installed CLI install --dry-run did not complete.");
+  if (existsSync(join(demoDirectory, ".polarbear", "config.toml"))) throw new Error("install --dry-run initialized the project.");
+  run(executable, ["install"], demoDirectory, memoryEnvironment);
+  for (const relativePath of [
+    join(".polarbear", "config.toml"), ".mcp.json", join(".claude", "settings.json"), join(".codex", "config.toml"),
+  ]) {
+    if (!existsSync(join(demoDirectory, relativePath))) throw new Error(`installed CLI did not create ${relativePath}.`);
+  }
+  const doctor = run(executable, ["doctor"], demoDirectory, memoryEnvironment);
+  if (!/Claude MCP\s+OK/u.test(doctor) || !/Codex MCP\s+OK/u.test(doctor)) {
+    throw new Error("installed CLI doctor did not confirm both Agent integrations.");
+  }
+  const savings = run(executable, ["savings"], demoDirectory, memoryEnvironment);
   if (!savings.includes("Estimated tokens saved")) throw new Error("installed CLI savings command did not complete.");
-  const reset = run(executable, ["savings", "reset", "--confirm", "RESET"], demoDirectory);
+  const reset = run(executable, ["savings", "reset", "--confirm", "RESET"], demoDirectory, memoryEnvironment);
   if (!reset.includes("Token savings counters reset.")) throw new Error("installed CLI savings reset did not complete.");
-  console.log(`npm tarball smoke test OK: installed CLI ${version}, init and savings commands passed.`);
+  console.log(`npm tarball smoke test OK: installed CLI ${version}, unified Agent install and savings commands passed.`);
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

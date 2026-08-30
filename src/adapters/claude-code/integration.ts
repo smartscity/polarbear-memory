@@ -17,7 +17,7 @@ const RULE_FILE = join(".claude", "rules", "polarbear-memory.md");
 const SETTINGS_FILE = join(".claude", "settings.json");
 const MANAGED_RULE = `# Polarbear Agent Context OS
 
-- At the start of a new session or when switching tasks, call \`context_get\` with the active task ID before broad repository exploration.
+- At the start of a new session or when switching tasks, call \`context_get\` before broad repository exploration. For substantive multi-session work, call \`task_create\` when no durable task exists.
 - Use \`task_get\` for durable task state and \`task_checkpoint\` at meaningful boundaries, before compaction, and before handoff.
 - Record explicit decisions and constraints with \`decision_record\` and \`constraint_record\`.
 - Use \`memory_get\` only when a returned Memory needs its full evidence or details.

@@ -59,7 +59,7 @@ polarbear-memory uninstall --keep-data
 
 ## 常见错误
 
-- `Project is not initialized`：在 Git 仓库中运行 `polarbear-memory init`。
+- `Project is not initialized`：在 Git 仓库中运行 `polarbear-memory install`，同时初始化项目并接入受支持的 Agent。
 - Provider unavailable：安装官方 CLI 并确认在 `PATH`。
 - Rotation requires checkpoint：fresh session 前保存当前结构化状态。
 - Database busy：关闭仍存活的长连接，不要手工删除活动 lease。
