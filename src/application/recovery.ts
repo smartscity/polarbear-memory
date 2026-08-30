@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type { ProjectBinding } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION } from "../storage/sqlite-store.js";
 import { withExclusiveDatabaseMaintenance } from "../storage/client-lease.js";
@@ -17,9 +17,9 @@ export interface BackupInspection {
 
 function assertContainedBackup(project: ProjectBinding, input: string): string {
   const backupRoot = join(project.dataDir, "backups");
-  const candidate = input.startsWith(sep) ? input : join(backupRoot, input);
+  const candidate = isAbsolute(input) ? input : join(backupRoot, input);
   const rel = relative(backupRoot, candidate);
-  if (rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Backup must be inside this project's backup directory.");
+  if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Backup must be inside this project's backup directory.");
   if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error("Backup file does not exist or is not a regular file.");
   return candidate;
 }

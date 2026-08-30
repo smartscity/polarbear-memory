@@ -18,8 +18,8 @@ test("validates and restores a backup while preserving a rollback database", asy
     name: "recovery",
     root,
     configPath: join(root, ".polarbear", "config.toml"),
-    dataDir: join(root, "data"),
-    databasePath: join(root, "data", "memory.db"),
+    dataDir: join(root, "data with spaces"),
+    databasePath: join(root, "data with spaces", "memory.db"),
   };
   mkdirSync(join(project.dataDir, "backups"), { recursive: true });
   const store = new SqliteMemoryStore(project.databasePath);
@@ -32,6 +32,7 @@ test("validates and restores a backup while preserving a rollback database", asy
   store.close();
 
   assert.equal(inspectBackup(project, "known-good.db").integrity, "ok");
+  assert.equal(inspectBackup(project, backupPath).integrity, "ok");
   assert.equal(listBackups(project).length, 1);
   const restored = restoreBackup(project, "known-good.db");
   assert.ok(restored.rollbackPath && existsSync(restored.rollbackPath));
