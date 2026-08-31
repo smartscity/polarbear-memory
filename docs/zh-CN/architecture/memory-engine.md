@@ -57,6 +57,8 @@ Canonical path、schema version 和 runtime fields 由 `api/runtime-launch-v1.js
 3. **价值**：达到保留期的已完成短期任务状态可以退出 active set。
 4. **存储保留**：长期 canonical 知识不会仅因时间久或使用少被静默清除。
 
+Raw Event 是临时运行历史，默认保留 30 天。Durable Memory 不使用简单的按年龄 TTL；高价值 `DECISION`、`ARCHITECTURE`、`CONSTRAINT` 和用户确认的事实不会仅因时间久而自动删除。只有有界、低价值的短期状态可以依据可解释 lifecycle policy 退出 active set。
+
 自动 lifecycle 动作必须有界、可解释、有审计并且可逆；只有用户明确 purge 才物理删除。
 
 原《知识淘汰机制验证方案》不再作为活动规格维护。已验收行为归本文所有，可执行证据归以下测试和 fixture 所有：

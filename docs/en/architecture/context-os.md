@@ -76,6 +76,17 @@ Resume failure records the failed run and falls back to a fresh session using th
 
 Schema v8 adds tasks, agent sessions, execution runs, observations, checkpoints, retrieval runs, context packets/items, and usage ledger records. The migration is additive, backed up, transactional, and foreign-key checked.
 
+## Desktop UX contract
+
+Polarbear Desktop is a focused Context client, not a Memory database administration surface. Its primary workflows are viewing assembled Context, searching durable Memory, and resolving rare exceptions. The full project path is visible in the Context header.
+
+- Context usage is shown as assembled tokens over the active budget. Budget mode is either `auto` or `custom`; `auto` is the default.
+- Savings are shown as a positive `Token savings` percentage. When assembled Context is larger than the comparison baseline, Desktop shows `Token impact` and a positive `more` percentage instead of a negative reduction.
+- Normal active Memory does not require approval. Attention is reserved for conflicts, disputed Memory, and important low-confidence or stale Memory.
+- Confirming an exception persists verification. Rejecting it removes the Memory from retrieval while retaining its revision history.
+- Engine and MCP lifecycle is automatic. Desktop reports Codex and Claude Code integration health through the Admin API and offers a bounded repair action; it does not expose start/stop process controls.
+- Desktop never reads project configuration, Agent configuration, or `memory.db` directly. Budget settings, integration health, and repair all cross the versioned Admin API.
+
 ## Verification evidence
 
 Automated coverage includes:

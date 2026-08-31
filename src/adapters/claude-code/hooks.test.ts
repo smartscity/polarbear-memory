@@ -144,11 +144,11 @@ test("database failure spools events and replay finalizes them later", () => {
   }
 });
 
-test("raw hook events expire after seven days even when SessionEnd never arrives", () => {
+test("raw hook events expire after thirty days even when SessionEnd never arrives", () => {
   const { root, project, restoreEnvironment } = fixture();
   try {
     ingestClaudeHook(stopInput(root, "abandoned-session"), root, new Date("2026-01-01T00:00:00.000Z"));
-    ingestClaudeHook(stopInput(root, "current-session"), root, new Date("2026-01-09T00:00:00.000Z"));
+    ingestClaudeHook(stopInput(root, "current-session"), root, new Date("2026-02-01T00:00:00.000Z"));
     const store = new SqliteMemoryStore(project.databasePath);
     try {
       const hash = (session: string) => createHash("sha256").update(session).digest("hex");

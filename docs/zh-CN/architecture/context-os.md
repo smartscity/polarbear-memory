@@ -56,6 +56,17 @@ Managed session 默认关闭，需要设置 `POLARBEAR_MANAGED_SESSIONS=1`。
 
 Rotation 使用确定性规则。没有 durable checkpoint 时拒绝 rotation；允许时先持久化新的 rotation-boundary checkpoint。Resume 失败会记录失败 run，并使用相同 Task 和 Packet 启动新 session。
 
+## Desktop UX 合同
+
+Polarbear Desktop 是聚焦于 Context 的客户端，不是 Memory 数据库管理工具。主要流程是查看已组装 Context、搜索持久 Memory，以及处理少量异常；Context 顶部必须显示完整项目路径。
+
+- Context 用量显示为已组装 token / 当前预算。预算模式只有 `auto` 和 `custom`，默认使用 `auto`。
+- 节省量使用正数 `Token 节省` 百分比；如果组装后的 Context 高于对比基线，则显示 `Token 影响` 和正数的“增加”比例，不显示负缩减率。
+- 普通 active Memory 无需批准。只有冲突、用户争议、重要但低置信度或已过期的 Memory 才需要处理。
+- 确认异常会持久保存验证状态；拒绝后该 Memory 不再参与检索，但修订历史仍保留。
+- Engine 与 MCP 生命周期自动管理。Desktop 通过 Admin API 显示 Codex 和 Claude Code 集成健康，并提供有界修复操作，不向普通用户暴露进程启停。
+- Desktop 不直接读取项目配置、Agent 配置或 `memory.db`；预算、集成健康和修复全部通过版本化 Admin API。
+
 ## 验证证据
 
 自动化测试覆盖 Task/Checkpoint 持久化、P0 预算、Packet 来源、A/B/C fixture、Claude lifecycle、两种 CLI JSONL/权限合同、rotation checkpoint、resume 恢复以及 Codex ↔ Claude 双向 handoff。

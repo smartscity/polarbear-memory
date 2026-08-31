@@ -20,7 +20,7 @@ Admin API 是 Polarbear Desktop 与本地管理客户端的完整控制面边界
 
 ## 能力族
 
-合同覆盖 system negotiation、project 状态/诊断/配置、Memory 全生命周期、Context 构建/解释、Task/Checkpoint/Run、Agent activity、Observation distillation、Usage、Maintenance、Backup/Restore 和 Knowledge promotion。
+合同覆盖 system negotiation、project 状态/诊断/配置、Memory 全生命周期、Context 构建/解释、Task/Checkpoint/Run、Agent activity、Codex/Claude Code 集成健康与修复、Observation distillation、Usage、Maintenance、Backup/Restore 和 Knowledge promotion。
 
 精确 capability 列表请直接读取 `api/admin-v1.json`。
 

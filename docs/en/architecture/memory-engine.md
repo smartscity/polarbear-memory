@@ -69,6 +69,8 @@ Knowledge retirement is a four-layer policy:
 3. **Utility:** completed short-term task state can leave the active set after its retention period.
 4. **Storage retention:** canonical durable knowledge is not silently purged merely because it is old or rarely used.
 
+Raw Events are temporary operational history and default to a 30-day retention window. Durable Memory has no simple age TTL. High-value `DECISION`, `ARCHITECTURE`, `CONSTRAINT`, and user-confirmed facts are never automatically deleted because of age; only bounded, low-value short-term state can leave the active set under an explainable lifecycle policy.
+
 Every automatic lifecycle action is bounded, explainable, audited, and reversible unless the user explicitly requests physical purge.
 
 The former standalone “knowledge retirement validation plan” is no longer an active specification. Its accepted behavior is owned here, while executable evidence is owned by:

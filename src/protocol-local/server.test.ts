@@ -319,15 +319,56 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
   });
   assert.equal((diagnostics.result as { networkPolicy: string }).networkPolicy, "disabled");
   assert.doesNotMatch(JSON.stringify(diagnostics.result), /memory\.db|projectRoot/u);
+  const defaults = await request(handle, {
+    id: "admin-config-defaults", apiVersion: ADMIN_API_VERSION, token, method: "projects.config",
+    params: { projectRoot: fixture.root },
+  });
+  assert.deepEqual(defaults.result, {
+    captureMode: "summary",
+    rawEventRetentionDays: 30,
+    contextBudgetMode: "auto",
+    defaultContextBudget: 2000,
+  });
   const configured = await request(handle, {
     id: "admin-config-1", apiVersion: ADMIN_API_VERSION, token, method: "projects.config_update",
-    params: { projectRoot: fixture.root, captureMode: "manual", rawEventRetentionDays: 3 },
+    params: {
+      projectRoot: fixture.root,
+      captureMode: "manual",
+      rawEventRetentionDays: 3,
+      contextBudgetMode: "custom",
+      defaultContextBudget: 2400,
+    },
   });
-  assert.deepEqual(configured.result, { captureMode: "manual", rawEventRetentionDays: 3, defaultContextBudget: 1000 });
+  assert.deepEqual(configured.result, {
+    captureMode: "manual",
+    rawEventRetentionDays: 3,
+    contextBudgetMode: "custom",
+    defaultContextBudget: 2400,
+  });
   const readConfig = await request(handle, {
     id: "admin-config-2", apiVersion: ADMIN_API_VERSION, token, method: "projects.config", params: { projectRoot: fixture.root },
   });
   assert.deepEqual(readConfig.result, configured.result);
+
+  const integrationsBefore = await request(handle, {
+    id: "admin-integrations-1", apiVersion: ADMIN_API_VERSION, token, method: "agents.integrations",
+    params: { projectRoot: fixture.root },
+  });
+  assert.deepEqual(
+    (integrationsBefore.result as { items: Array<{ id: string; status: string }> }).items.map(({ id, status }) => ({ id, status })),
+    [
+      { id: "codex", status: "NEEDS_ATTENTION" },
+      { id: "claude-code", status: "NEEDS_ATTENTION" },
+    ],
+  );
+  const repaired = await request(handle, {
+    id: "admin-integrations-2", apiVersion: ADMIN_API_VERSION, token, method: "agents.integrations_repair",
+    params: { projectRoot: fixture.root, integration: "codex" },
+  });
+  assert.equal(
+    (repaired.result as { items: Array<{ id: string; status: string }> }).items.find(({ id }) => id === "codex")?.status,
+    "CONNECTED",
+  );
 
   const preview = await request(handle, {
     id: "admin-4", apiVersion: ADMIN_API_VERSION, token, method: "maintenance.preview", params: { projectRoot: fixture.root },

@@ -73,6 +73,12 @@ export type AgentConnectionStatus = {
   provider: string; integrationMode: "ASSISTED" | "MANAGED"; status: "ACTIVE" | "IDLE" | "FAILED";
   lastSeenAt: string; activeRunCount: number;
 };
+export type AgentIntegrationStatus = {
+  id: "codex" | "claude-code";
+  name: "Codex" | "Claude Code";
+  status: "CONNECTED" | "NEEDS_ATTENTION";
+  detail?: "INSTALL_REQUIRED" | "MIGRATION_REQUIRED" | "CONFIGURATION_CONFLICT";
+};
 export type ContextPacketItem = {
   rank: number; sourceType: "TASK" | "CHECKPOINT" | "MEMORY"; sourceId: string; category: ContextCategory;
   priority: 0 | 1 | 2 | 3; score: number; estimatedTokens: number; reason: string; content: string; truncated: boolean;
@@ -106,7 +112,12 @@ export type MaintenanceAction = { memoryId: string; previousRisk: string; newRis
 export type MaintenancePlan = { policyVersion: string; assessorVersion: string; dryRun: boolean; checkedCommit?: string; evaluated: number; changed: number; rawEventsDeleted: number; actions: MaintenanceAction[] };
 export type BackupInspection = { fileName: string; schemaVersion: number; integrity: "ok"; bytes: number; sha256: string; pages?: number };
 export type BackupListResponse = { items: BackupInspection[] };
-export type ProjectMemoryConfig = { captureMode: "off" | "manual" | "summary"; rawEventRetentionDays: number; defaultContextBudget: number };
+export type ProjectMemoryConfig = {
+  captureMode: "off" | "manual" | "summary";
+  rawEventRetentionDays: number;
+  contextBudgetMode: "auto" | "custom";
+  defaultContextBudget: number;
+};
 export type BackupRestorePreview = { backup: BackupInspection; confirmation: string; warning: string };
 export type BackupRestoreResult = { restored: BackupInspection; rollbackFileName: string | null };
 export type MemoryPurgePreview = { memory: Pick<MemoryRecord, "id" | "summary" | "type" | "revisionCount">; confirmation: string; warning: string };
@@ -114,3 +125,4 @@ export type MemoryPurgeResult = { purgedMemoryIdHash: string };
 export type TaskCheckpointListResponse = { items: TaskCheckpoint[] };
 export type TaskRunListResponse = { items: ExecutionRun[] };
 export type AgentConnectionListResponse = { items: AgentConnectionStatus[] };
+export type AgentIntegrationListResponse = { items: AgentIntegrationStatus[] };

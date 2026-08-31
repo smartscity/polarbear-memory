@@ -31,6 +31,8 @@
     "tasks.runs",
     "tasks.run_context",
     "agents.connections",
+    "agents.integrations",
+    "agents.integrations_repair",
     "observations.distill",
     "usage.context_os",
     "usage.token_savings",

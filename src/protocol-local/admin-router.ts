@@ -12,6 +12,9 @@ import { VERSION } from "../version.js";
 import { ApiError } from "./admin-errors.js";
 import { parseRecordMemoryInput } from "./admin-record-input.js";
 import { TASK_PHASES, TASK_STATUSES, emptyCheckpointState, type CheckpointState, type TaskPhase, type TaskStatus } from "../domain/context-os.js";
+import { installClaudeIntegration, planClaudeIntegration } from "../adapters/claude-code/integration.js";
+import { installCodexIntegration, planCodexIntegration } from "../adapters/codex/integration.js";
+import { resolveAgentRuntime } from "../platform/agent-launch.js";
 
 export { ApiError } from "./admin-errors.js";
 
@@ -44,6 +47,8 @@ export const ADMIN_CAPABILITIES = [
   "tasks.runs",
   "tasks.run_context",
   "agents.connections",
+  "agents.integrations",
+  "agents.integrations_repair",
   "observations.distill",
   "usage.context_os",
   "usage.token_savings",
@@ -226,10 +231,19 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
     if (captureMode && !["off", "manual", "summary"].includes(captureMode)) throw new ApiError("INVALID_ARGUMENT", "Unsupported capture mode.");
     const retention = params.rawEventRetentionDays === undefined
       ? undefined
-      : integer(params.rawEventRetentionDays, "rawEventRetentionDays", 7, 0, 30);
+      : integer(params.rawEventRetentionDays, "rawEventRetentionDays", 30, 0, 30);
+    const contextBudgetMode = optionalText(params.contextBudgetMode, "contextBudgetMode", 16)?.toLowerCase() as "auto" | "custom" | undefined;
+    if (contextBudgetMode && contextBudgetMode !== "auto" && contextBudgetMode !== "custom") {
+      throw new ApiError("INVALID_ARGUMENT", "Unsupported context budget mode.");
+    }
+    const defaultContextBudget = params.defaultContextBudget === undefined
+      ? undefined
+      : integer(params.defaultContextBudget, "defaultContextBudget", 2_000, 400, 12_000);
     return updateProjectPolicy(project.configPath, {
       ...(captureMode ? { captureMode } : {}),
       ...(retention !== undefined ? { rawEventRetentionDays: retention } : {}),
+      ...(contextBudgetMode ? { contextBudgetMode } : {}),
+      ...(defaultContextBudget !== undefined ? { defaultContextBudget } : {}),
     });
   }
   if (method === "memories.list") {
@@ -418,6 +432,49 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
   }
   if (method === "agents.connections") {
     return withProject(params.projectRoot, (store, project) => ({ items: store.contextOs().listAgentConnections(project.id) }));
+  }
+  if (method === "agents.integrations" || method === "agents.integrations_repair") {
+    const project = loadProject(discoverGitContext(text(params.projectRoot, "projectRoot", 16 * 1024)));
+    const runtime = resolveAgentRuntime();
+    if (method === "agents.integrations_repair") {
+      const integration = text(params.integration, "integration", 32).toLowerCase();
+      if (integration === "codex") installCodexIntegration(project, { dryRun: false, runtime });
+      else if (integration === "claude-code") installClaudeIntegration(project, { dryRun: false, runtime });
+      else throw new ApiError("INVALID_ARGUMENT", "Unsupported agent integration.");
+    }
+    const codex = (() => {
+      try {
+        const plan = planCodexIntegration(project, runtime);
+        return plan.alreadyInstalled
+          ? { id: "codex", name: "Codex", status: "CONNECTED" }
+          : {
+              id: "codex",
+              name: "Codex",
+              status: "NEEDS_ATTENTION",
+              detail: plan.conflict ? "CONFIGURATION_CONFLICT" : plan.migrationRequired ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+            };
+      } catch {
+        return { id: "codex", name: "Codex", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT" };
+      }
+    })();
+    const claude = (() => {
+      try {
+        const plan = planClaudeIntegration(project, runtime);
+        return plan.alreadyInstalled
+          ? { id: "claude-code", name: "Claude Code", status: "CONNECTED" }
+          : {
+              id: "claude-code",
+              name: "Claude Code",
+              status: "NEEDS_ATTENTION",
+              detail: plan.legacyConfiguration ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+            };
+      } catch {
+        return { id: "claude-code", name: "Claude Code", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT" };
+      }
+    })();
+    return {
+      items: [codex, claude],
+    };
   }
   if (method === "contexts.build") {
     return withProject(params.projectRoot, (store, project) => store.contextOs().buildContext(project.id, {
