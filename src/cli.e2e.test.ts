@@ -9,17 +9,13 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const CLI_PROCESS_TIMEOUT_MS = 120_000;
-const SQLITE_EXPERIMENTAL_WARNING = /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(?:\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n)?/gmu;
-
 function assertNoUnexpectedStderr(stderr: string): void {
-  assert.equal(stderr.replace(SQLITE_EXPERIMENTAL_WARNING, ""), "");
+  assert.equal(stderr, "");
 }
 
-test("CLI stderr policy tolerates only the known Node 24 SQLite warning", () => {
-  assertNoUnexpectedStderr(
-    "(node:25778) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n" +
-    "(Use `node --trace-warnings ...` to show where the warning was created)\n",
-  );
+test("CLI stderr policy rejects warning noise and application errors", () => {
+  assertNoUnexpectedStderr("");
+  assert.throws(() => assertNoUnexpectedStderr("SQLite is an experimental feature\n"));
   assert.throws(() => assertNoUnexpectedStderr("unexpected application error\n"));
 });
 
