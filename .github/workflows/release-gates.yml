@@ -12,14 +12,29 @@ permissions:
 
 jobs:
   agent-launch-compatibility:
-    name: Agent launch (${{ matrix.os }}, Node ${{ matrix.node }})
+    name: Runtime compatibility (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-latest, windows-latest]
-        node: [24.10.0, 26.x]
+        include:
+          - os: macos-15
+            node: 24.10.0
+          - os: macos-15
+            node: 26.x
+          - os: ubuntu-latest
+            node: 24.10.0
+          - os: ubuntu-latest
+            node: 24.x
+          - os: ubuntu-latest
+            node: 25.x
+          - os: ubuntu-latest
+            node: 26.x
+          - os: windows-latest
+            node: 24.10.0
+          - os: windows-latest
+            node: 26.x
 
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +46,12 @@ jobs:
 
       - run: npm ci --ignore-scripts
       - run: npm run build:test
-      - name: Verify runtime-independent Agent launch
+      - name: Verify CLI, SQLite and Agent compatibility
         run: >-
           node --test
+          dist-test/runtime/sqlite-warning-filter.test.js
           dist-test/platform/agent-launch.test.js
+          dist-test/platform/runtime-descriptor.test.js
           dist-test/adapters/codex/integration.test.js
           dist-test/adapters/claude-code/integration.test.js
           dist-test/cli.e2e.test.js

@@ -28,7 +28,7 @@ npm pack --dry-run
 
 The package audit enforces the publication allowlist. Do not rely only on `.gitignore` or `.npmignore`.
 
-CI also runs the Agent integration suite on macOS, Linux, and Windows with the minimum supported Node 24 release and the latest supported Node 26 release. It covers structured launch generation, legacy migration, paths with spaces, minimal-PATH MCP startup, and doctor repair diagnostics.
+CI runs the runtime compatibility suite against the exact minimum Node `24.10.0`, the latest Node 24 patch, Node 25, and the latest Node 26 release. Linux covers every supported major; macOS and Windows cover the minimum and maximum boundaries. The suite covers CLI stderr policy, `node:sqlite` startup, structured launch generation, descriptor repair, legacy migration, paths with spaces, minimal-PATH MCP startup, and doctor diagnostics. Supporting a Node range does not mean testing every patch release, but every supported major and both declared boundaries must remain gated.
 
 ## npm publication
 
