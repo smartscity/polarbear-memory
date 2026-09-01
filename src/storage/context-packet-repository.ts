@@ -116,6 +116,13 @@ export class ContextPacketRepository {
     return packet;
   }
 
+  latest(projectId: string): ContextPacket | undefined {
+    const row = this.#database.prepare(
+      "SELECT id FROM context_packets WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    ).get(projectId) as { id: string } | undefined;
+    return row ? this.get(projectId, row.id) : undefined;
+  }
+
   explain(projectId: string, packetId: string): ContextExplanation {
     const packet = this.require(projectId, packetId);
     const retrieval = this.#database.prepare("SELECT budget_json, exclusions_json FROM retrieval_runs WHERE project_id = ? AND id = ?")

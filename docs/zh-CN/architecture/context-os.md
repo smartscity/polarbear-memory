@@ -32,19 +32,25 @@ Planner 合并 Task、最新 Checkpoint、混合 Memory 检索和近期 task-sco
 
 Packet 保存 hash、来源、选择原因、分类预算、排除原因、token 估算与检索耗时。当前请求只在返回值中存在，持久化时保存 digest。
 
-## Observe 与 Distill
+未提供明确硬预算时，Planner 会根据请求规模、Task/Checkpoint、强制项和有界检索候选集，在 500 到 8,000 Token 之间确定自动预算。Workspace 使用 `custom` 模式时始终传入配置的硬预算。自动预算是确定性的，并且不会绕过 12,000 Token 的绝对安全上限。
 
-Claude assisted mode 支持 SessionStart、UserPromptSubmit、Pre/PostToolUse、Pre/PostCompact、Stop 和 SessionEnd。
+## Lifecycle 集成
+
+Provider-neutral `LifecycleOrchestrator` 把 lifecycle event 映射到已有 Context OS port。Claude Code lifecycle-managed 模式支持 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PostToolUseFailure、PostToolBatch、PreCompact、PostCompact、Stop、StopFailure 和 SessionEnd。
 
 - payload 限长并脱敏；
 - prompt 只保存 digest；
-- SessionStart 可按 `POLARBEAR_TASK_ID` 注入上下文；
-- PreCompact 保存 checkpoint 边界；
-- SessionEnd 执行有界确定性 distillation；
+- SessionStart 解析显式 Task，或按确定性策略选择可继续 Task，并返回有界 continuation context；
+- UserPromptSubmit 只在检索期间临时使用原始 prompt，并在模型处理前返回 prompt-specific additional context；
+- Stop 和 StopFailure 执行 session-scoped 确定性 distillation，SessionEnd 只负责有界的最终 flush；
+- PreCompact 保留已有结构化 continuation state，不再用通用 marker 覆盖；
+- PostCompact 记录边界；由于该事件不能注入 context，下一次 prompt 负责 rehydration；
 - fingerprint 保证幂等；
 - 数据库失败时写入本地 spool，稍后 replay。
 
 当前 distiller 只提取明确标记的 decision、pitfall、task state 和 next step，不声称能理解任意 tool output。
+
+Codex 项目集成仍为 MCP-assisted，因为 stock Codex 没有向 Polarbear 暴露等价的项目 hook surface。Lifecycle-managed Codex 需要由 Polarbear 控制 App Server client，以便拦截 `turn/start` 并消费 thread、turn 和 item event；当前实现不宣称具备该 adapter。Admin API 会明确报告 `LIFECYCLE_MANAGED`、`MCP_ASSISTED` 或 `UNAVAILABLE`。
 
 ## Managed runtime 与 rotation
 
@@ -61,11 +67,14 @@ Rotation 使用确定性规则。没有 durable checkpoint 时拒绝 rotation；
 Polarbear Desktop 是聚焦于 Context 的客户端，不是 Memory 数据库管理工具。主要流程是查看已组装 Context、搜索持久 Memory，以及处理少量异常；Context 顶部必须显示完整项目路径。
 
 - Context 用量显示为已组装 token / 当前预算。预算模式只有 `auto` 和 `custom`，默认使用 `auto`。
+- Context 首页通过 `contexts.current` 读取最近的不可变 Packet，汇总来源类别，并且只展示当前 Context、Memory 复用、Token 影响和异常健康状态。
 - 节省量使用正数 `Token 节省` 百分比；如果组装后的 Context 高于对比基线，则显示 `Token 影响` 和正数的“增加”比例，不显示负缩减率。
 - 普通 active Memory 无需批准。只有冲突、用户争议、重要但低置信度或已过期的 Memory 才需要处理。
 - 确认异常会持久保存验证状态；拒绝后该 Memory 不再参与检索，但修订历史仍保留。
+- 用户编辑会创建修订，并立即成为高置信、由用户确认的 Memory。Confirm 会提升置信度并清除 Attention；Reject 执行明确的 `REJECTED` 生命周期转换，不伪装成 Archive 或删除。
 - Engine 与 MCP 生命周期自动管理。Desktop 通过 Admin API 显示 Codex 和 Claude Code 集成健康，并提供有界修复操作，不向普通用户暴露进程启停。
 - Desktop 不直接读取项目配置、Agent 配置或 `memory.db`；预算、集成健康和修复全部通过版本化 Admin API。
+- Desktop 一级导航只保留 Context、Memory 和 Settings。Raw History 保留时间仅以摘要显示，并只能在 Advanced 中修改；Durable Memory 不使用基于年龄的 TTL。
 
 ## 验证证据
 

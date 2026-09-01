@@ -196,7 +196,7 @@ test("manages V2 records, task completion, feedback and resettable token savings
   assert.equal((reset.result as { resetCount: number }).resetCount, 1);
 });
 
-test("Admin API 1.4 manages durable tasks, checkpoints and explainable Context Packets", async () => {
+test("Admin API 1.5 manages durable tasks, checkpoints and explainable Context Packets", async () => {
   const fixture = repository();
   const handle = await startAdminApi(fixture.dataRoot);
   handles.push(handle);
@@ -329,6 +329,22 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
     contextBudgetMode: "auto",
     defaultContextBudget: 2000,
   });
+  const noCurrentContext = await request(handle, {
+    id: "admin-context-current-empty", apiVersion: ADMIN_API_VERSION, token, method: "contexts.current",
+    params: { projectRoot: fixture.root },
+  });
+  assert.equal((noCurrentContext.result as { packet: unknown }).packet, null);
+  const autoContext = await request(handle, {
+    id: "admin-context-auto", apiVersion: ADMIN_API_VERSION, token, method: "contexts.build",
+    params: { projectRoot: fixture.root, currentRequest: "Review the current project decisions." },
+  });
+  const autoPacket = autoContext.result as { id: string; maxTokens: number };
+  assert.ok(autoPacket.maxTokens >= 500 && autoPacket.maxTokens <= 8_000);
+  const currentContext = await request(handle, {
+    id: "admin-context-current", apiVersion: ADMIN_API_VERSION, token, method: "contexts.current",
+    params: { projectRoot: fixture.root },
+  });
+  assert.equal((currentContext.result as { packet: { id: string } }).packet.id, autoPacket.id);
   const configured = await request(handle, {
     id: "admin-config-1", apiVersion: ADMIN_API_VERSION, token, method: "projects.config_update",
     params: {
@@ -355,19 +371,40 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
     params: { projectRoot: fixture.root },
   });
   assert.deepEqual(
-    (integrationsBefore.result as { items: Array<{ id: string; status: string }> }).items.map(({ id, status }) => ({ id, status })),
+    (integrationsBefore.result as {
+      items: Array<{ id: string; status: string; integrationMode: string; lifecycle: string }>;
+    }).items.map(({ id, status, integrationMode, lifecycle }) => ({ id, status, integrationMode, lifecycle })),
     [
-      { id: "codex", status: "NEEDS_ATTENTION" },
-      { id: "claude-code", status: "NEEDS_ATTENTION" },
+      { id: "codex", status: "NEEDS_ATTENTION", integrationMode: "UNAVAILABLE", lifecycle: "UNSUPPORTED" },
+      { id: "claude-code", status: "NEEDS_ATTENTION", integrationMode: "UNAVAILABLE", lifecycle: "NOT_CONFIGURED" },
     ],
   );
   const repaired = await request(handle, {
     id: "admin-integrations-2", apiVersion: ADMIN_API_VERSION, token, method: "agents.integrations_repair",
     params: { projectRoot: fixture.root, integration: "codex" },
   });
+  const repairedCodex = (repaired.result as {
+    items: Array<{
+      id: string;
+      status: string;
+      detail?: string;
+      mcp: string;
+      runtime: string;
+      handshake: string;
+      integrationMode: string;
+    }>;
+  }).items.find(({ id }) => id === "codex");
+  assert.equal(repairedCodex?.mcp, "CONFIGURED");
+  assert.equal(repairedCodex?.runtime, "READY");
+  assert.ok(
+    repairedCodex?.status === "CONNECTED"
+      || (repairedCodex?.status === "NEEDS_ATTENTION"
+        && repairedCodex.handshake === "FAILED"
+        && repairedCodex.detail === "HANDSHAKE_FAILED"),
+  );
   assert.equal(
-    (repaired.result as { items: Array<{ id: string; status: string }> }).items.find(({ id }) => id === "codex")?.status,
-    "CONNECTED",
+    repairedCodex?.integrationMode,
+    "MCP_ASSISTED",
   );
 
   const preview = await request(handle, {
@@ -378,6 +415,12 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
     id: "admin-5", apiVersion: ADMIN_API_VERSION, token, method: "maintenance.run", params: { projectRoot: fixture.root },
   });
   assert.equal((maintained.result as { dryRun: boolean }).dryRun, false);
+
+  const rejected = await request(handle, {
+    id: "admin-reject", apiVersion: ADMIN_API_VERSION, token, method: "memories.reject",
+    params: { projectRoot: fixture.root, memoryId, reason: "The user rejected this Memory." },
+  });
+  assert.equal((rejected.result as { lifecycleStatus: string }).lifecycleStatus, "REJECTED");
 
   const created = await request(handle, {
     id: "admin-6", apiVersion: ADMIN_API_VERSION, token, method: "backups.create", params: { projectRoot: fixture.root },
@@ -421,12 +464,13 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
       reason: "Clarify the rendering boundary",
     },
   });
-  assert.equal((updated.result as { verificationState: string }).verificationState, "UNVERIFIED");
+  assert.equal((updated.result as { verificationState: string; confidence: number }).verificationState, "VERIFIED");
+  assert.equal((updated.result as { confidence: number }).confidence, 1_000);
   const updatedHistory = await request(handle, {
     id: "admin-13", apiVersion: ADMIN_API_VERSION, token, method: "memories.history",
     params: { projectRoot: fixture.root, memoryId },
   });
-  assert.equal((updatedHistory.result as { items: unknown[] }).items.length, 2);
+  assert.equal((updatedHistory.result as { items: unknown[] }).items.length, 3);
 
   const purgePreview = await request(handle, {
     id: "admin-14", apiVersion: ADMIN_API_VERSION, token, method: "memories.purge_preview",

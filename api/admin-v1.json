@@ -1,6 +1,6 @@
 {
   "title": "Polarbear Memory Local Admin API",
-  "version": "1.4",
+  "version": "1.5",
   "engineVersion": "0.1.0",
   "transport": "user-scoped-unix-domain-socket",
   "maxFrameBytes": 1048576,
@@ -13,6 +13,7 @@
     "memories.history",
     "memories.update",
     "memories.verify",
+    "memories.reject",
     "memories.archive",
     "memories.restore",
     "memories.complete",
@@ -22,6 +23,7 @@
     "memories.purge",
     "contexts.explain",
     "contexts.build",
+    "contexts.current",
     "contexts.packet_explain",
     "tasks.list",
     "tasks.get",

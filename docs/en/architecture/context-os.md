@@ -44,19 +44,25 @@ Optional architecture, episodic, verification, and semantic candidates are admit
 
 Every packet records its hash, sources, selection reasons, category usage, exclusions, estimated tokens, and retrieval latency. Raw current requests are returned to the caller but only a digest is persisted.
 
-## Observe and distill
+When no explicit hard budget is supplied, the planner chooses an automatic budget between 500 and 8,000 tokens from request size, task/checkpoint presence, mandatory items, and the bounded retrieved candidate set. A workspace in `custom` mode always supplies its configured hard budget instead. Automatic budgeting is deterministic and never bypasses the 12,000-token absolute safety limit.
 
-Claude assisted mode supports SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, PostCompact, Stop, and SessionEnd hooks.
+## Lifecycle integration
+
+The provider-neutral `LifecycleOrchestrator` maps lifecycle events onto existing Context OS ports. Claude Code lifecycle-managed mode supports SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, PreCompact, PostCompact, Stop, StopFailure, and SessionEnd hooks.
 
 - hook payloads are bounded and redacted;
 - raw prompts are represented by digests;
-- SessionStart can return task context selected by `POLARBEAR_TASK_ID`;
-- PreCompact persists a checkpoint boundary;
-- SessionEnd runs bounded deterministic distillation;
+- SessionStart resolves an explicit or deterministic active Task and returns bounded continuation context;
+- UserPromptSubmit uses the raw prompt transiently for retrieval and returns prompt-specific additional context before model processing;
+- Stop and StopFailure run session-scoped deterministic distillation, so SessionEnd is only a bounded final flush;
+- PreCompact preserves the previous structured continuation state instead of replacing it with a generic marker;
+- PostCompact records the boundary; the next prompt performs rehydration because PostCompact does not support context injection;
 - duplicate event fingerprints are idempotent;
 - database failures spool events locally for later replay.
 
 The baseline distiller extracts only explicitly labeled reusable decisions, pitfalls, task state, and next steps. It does not claim general semantic understanding of arbitrary tool output.
+
+Codex project integration remains MCP-assisted because stock Codex does not expose an equivalent project hook surface to Polarbear. Lifecycle-managed Codex requires a Polarbear-owned App Server client that can intercept `turn/start` and consume thread, turn, and item events; that adapter is not claimed by the current implementation. The Admin API reports `LIFECYCLE_MANAGED`, `MCP_ASSISTED`, or `UNAVAILABLE` explicitly.
 
 ## Managed runtimes and rotation
 
@@ -81,11 +87,14 @@ Schema v8 adds tasks, agent sessions, execution runs, observations, checkpoints,
 Polarbear Desktop is a focused Context client, not a Memory database administration surface. Its primary workflows are viewing assembled Context, searching durable Memory, and resolving rare exceptions. The full project path is visible in the Context header.
 
 - Context usage is shown as assembled tokens over the active budget. Budget mode is either `auto` or `custom`; `auto` is the default.
+- The Context landing page reads the latest immutable packet through `contexts.current`, summarizes its source categories, and shows only Current Context, Memory reuse, token impact, and exception health.
 - Savings are shown as a positive `Token savings` percentage. When assembled Context is larger than the comparison baseline, Desktop shows `Token impact` and a positive `more` percentage instead of a negative reduction.
 - Normal active Memory does not require approval. Attention is reserved for conflicts, disputed Memory, and important low-confidence or stale Memory.
 - Confirming an exception persists verification. Rejecting it removes the Memory from retrieval while retaining its revision history.
+- A human edit creates a revision and immediately becomes high-confidence, human-verified Memory. Confirm raises confidence and clears attention. Reject performs an explicit `REJECTED` lifecycle transition; it is not disguised as archive or deletion.
 - Engine and MCP lifecycle is automatic. Desktop reports Codex and Claude Code integration health through the Admin API and offers a bounded repair action; it does not expose start/stop process controls.
 - Desktop never reads project configuration, Agent configuration, or `memory.db` directly. Budget settings, integration health, and repair all cross the versioned Admin API.
+- Desktop navigation is limited to Context, Memory, and Settings. Raw-history retention is visible as a summary and editable only under Advanced; durable Memory has no age-based TTL.
 
 ## Verification evidence
 

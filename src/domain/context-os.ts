@@ -221,9 +221,10 @@ export interface ContextOsPort {
   startExecution(projectId: string, input: { taskId?: string; provider: string; phase: TaskPhase; externalSessionRef?: string; integrationMode: "ASSISTED" | "MANAGED"; contextPacketId?: string; model?: string; rotationReason?: RotationReason }): ExecutionRun;
   finishExecution(projectId: string, runId: string, input: { status: "SUCCEEDED" | "FAILED" | "CANCELLED"; externalSessionRef?: string }): ExecutionRun;
   buildContext(projectId: string, input: { currentRequest: string; taskId?: string; maxTokens?: number; provider?: string }): ContextPacket;
+  currentContext(projectId: string): ContextPacket | undefined;
   explainContext(projectId: string, packetId: string): ContextExplanation;
   recordObservation(projectId: string, input: Omit<Observation, "id" | "projectId"> & { sourceFingerprint?: string }): Observation;
-  distill(projectId: string, limit?: number): { observations: number; candidates: number; recorded: number };
+  distill(projectId: string, limit?: number, sessionRefHash?: string): { observations: number; candidates: number; recorded: number };
   recordUsage(projectId: string, input: Omit<UsageLedgerEntry, "id" | "projectId" | "createdAt">): UsageLedgerEntry;
   metrics(projectId: string, taskId?: string): ContextOsMetrics;
   decideRotation(input: RotationContext): RotationDecision;

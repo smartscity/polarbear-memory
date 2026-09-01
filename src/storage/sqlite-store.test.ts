@@ -336,10 +336,17 @@ test("edits create an auditable revision and physical purge keeps a tombstone au
     reason: "Architecture decision was refined",
   });
   assert.equal(updated.summary, "Use the local Admin API");
-  assert.equal(updated.verificationState, "UNVERIFIED");
+  assert.equal(updated.verificationState, "VERIFIED");
+  assert.equal(updated.confidence, 1_000);
   const revisions = store.revisions(projectId, memory.id);
   assert.equal(revisions.length, 2);
   assert.equal(revisions[0]?.reason, "edit:Architecture decision was refined");
+
+  const rejected = store.reject(projectId, memory.id, "The user rejected this Memory");
+  assert.equal(rejected.lifecycleStatus, "REJECTED");
+  assert.equal(rejected.verificationState, "DISPUTED");
+  assert.equal(store.search(projectId, "local Admin API", 10).some((result) => result.memory.id === memory.id), false);
+  assert.equal(store.revisions(projectId, memory.id).length, 3);
 
   const purged = store.purge(projectId, memory.id, "User explicitly requested permanent deletion");
   assert.match(purged.purgedMemoryIdHash, /^[a-f0-9]{64}$/u);

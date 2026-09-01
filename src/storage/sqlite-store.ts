@@ -272,6 +272,10 @@ export class SqliteMemoryStore implements MemoryStore {
     return this.#lifecycle.verify(projectId, memoryId, state, reason, actor, evidence);
   }
 
+  reject(projectId: string, memoryId: string, reason: string): Memory {
+    return this.#lifecycle.reject(projectId, memoryId, reason);
+  }
+
   archive(projectId: string, memoryId: string, reason: string, actor: "HUMAN_CLI" | "AGENT_MCP" = "AGENT_MCP"): Memory {
     return this.#lifecycle.archive(projectId, memoryId, reason, actor);
   }

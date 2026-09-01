@@ -33,9 +33,10 @@ export class LifecycleService {
     inImmediateTransaction(this.#database, () => {
       this.#database.prepare(`
         UPDATE knowledge_units SET verification_state = ?, correctness_risk = 'LOW',
+          confidence_milli = CASE WHEN ? = 'HUMAN_CLI' AND ? = 'VERIFIED' THEN 1000 ELSE confidence_milli END,
           last_checked_commit = coalesce(?, last_checked_commit), last_assessed_at = ?, updated_at = ?
         WHERE project_id = ? AND id = ?
-      `).run(state, evidence.checkedCommit ?? null, now, now, projectId, memoryId);
+      `).run(state, actor, state, evidence.checkedCommit ?? null, now, now, projectId, memoryId);
       for (const anchor of evidence.anchors ?? []) this.#knowledge.upsertFileAnchor(projectId, memoryId, anchor, now, evidence.checkedCommit);
       recordLifecycleAssessment(this.#database, {
         knowledgeId: memoryId,
@@ -57,6 +58,39 @@ export class LifecycleService {
     const updated = this.#knowledge.get(projectId, memoryId);
     if (!updated) throw new Error(`Memory not found after verification: ${memoryId}`);
     return updated;
+  }
+
+  reject(projectId: string, memoryId: string, reason: string): Memory {
+    validateReason(reason, "Reject");
+    const memory = this.#knowledge.get(projectId, memoryId);
+    if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+    if (memory.lifecycleStatus === "REJECTED") return memory;
+    const now = new Date().toISOString();
+    inImmediateTransaction(this.#database, () => {
+      this.#database.prepare(`
+        UPDATE knowledge_units SET lifecycle_status = 'REJECTED', verification_state = 'DISPUTED',
+          correctness_risk = 'LOW', updated_at = ? WHERE project_id = ? AND id = ?
+      `).run(now, projectId, memoryId);
+      recordLifecycleAssessment(this.#database, {
+        knowledgeId: memoryId,
+        previousRisk: memory.correctnessRisk,
+        newRisk: "LOW",
+        previousLifecycle: memory.lifecycleStatus,
+        newLifecycle: "REJECTED",
+        relevance: memory.relevance,
+        checkedCommit: memory.lastCheckedCommit,
+        reasonCodes: ["HUMAN_REJECT"],
+        policyVersion: POLICY_VERSION,
+        assessorVersion: ASSESSOR_VERSION,
+        assessedAt: now,
+      });
+      this.#knowledge.appendRevision(memory, `reject:${reason.trim()}`, "HUMAN_CLI", now);
+      this.#knowledge.recordVerificationEvidence(projectId, memoryId, "DISPUTED", reason, memory.lastCheckedCommit, now);
+      this.#knowledge.refreshIndex(memoryId);
+    });
+    const rejected = this.#knowledge.get(projectId, memoryId);
+    if (!rejected) throw new Error(`Memory not found after rejection: ${memoryId}`);
+    return rejected;
   }
 
 
@@ -287,4 +321,3 @@ export class LifecycleService {
 
 
 }
-

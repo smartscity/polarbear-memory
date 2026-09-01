@@ -16,6 +16,25 @@ interface Candidate extends Omit<ContextPacketItem, "rank"> {
   stableOrder: string;
 }
 
+const AUTO_BUDGET_MIN = 500;
+const AUTO_BUDGET_MAX = 8_000;
+
+export function automaticContextBudget(input: {
+  requestTokens: number;
+  candidateTokens: number;
+  hasTask: boolean;
+  hasCheckpoint: boolean;
+  mandatoryCount: number;
+}): number {
+  const estimated = 600
+    + Math.min(1_200, input.requestTokens * 4)
+    + (input.hasTask ? 500 : 0)
+    + (input.hasCheckpoint ? 500 : 0)
+    + Math.min(4_800, Math.round(input.candidateTokens * 0.5))
+    + Math.min(400, input.mandatoryCount * 100);
+  return Math.min(AUTO_BUDGET_MAX, Math.max(AUTO_BUDGET_MIN, Math.ceil(estimated / 100) * 100));
+}
+
 const CATEGORY_SHARE: Record<ContextCategory, number> = {
   OBJECTIVE: 0.08, WORKING_MEMORY: 0.20, CONSTRAINTS: 0.14, DECISIONS: 0.14,
   ARCHITECTURE: 0.12, EPISODES: 0.10, VERIFICATION: 0.08, SEMANTIC: 0.10, SOURCES: 0.04,
@@ -87,8 +106,7 @@ export class ContextPlanner {
     const started = Date.now();
     const request = input.currentRequest.trim();
     if (!request) throw new Error("Current request must not be empty.");
-    const maxTokens = input.maxTokens ?? 2_000;
-    if (!Number.isInteger(maxTokens) || maxTokens < 400 || maxTokens > 12_000) {
+    if (input.maxTokens !== undefined && (!Number.isInteger(input.maxTokens) || input.maxTokens < 400 || input.maxTokens > 12_000)) {
       throw new Error("Context budget must be an integer between 400 and 12000 tokens.");
     }
     const task = input.taskId ? this.#tasks.requireTask(projectId, input.taskId) : undefined;
@@ -108,6 +126,13 @@ export class ContextPlanner {
       memories = this.#recall.recent(projectId, 100);
     }
     const candidates = this.#candidates(task, checkpoint, memories);
+    const maxTokens = input.maxTokens ?? automaticContextBudget({
+      requestTokens: estimateTokens(request),
+      candidateTokens: candidates.reduce((sum, candidate) => sum + candidate.estimatedTokens, 0),
+      hasTask: Boolean(task),
+      hasCheckpoint: Boolean(checkpoint),
+      mandatoryCount: candidates.filter((candidate) => candidate.priority === 0).length,
+    });
     const fixedText = this.#header(task, request, maxTokens);
     const fixedTokens = estimateTokens(fixedText);
     const contentBudget = Math.max(0, maxTokens - fixedTokens);

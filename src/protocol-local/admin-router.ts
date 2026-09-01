@@ -14,11 +14,15 @@ import { parseRecordMemoryInput } from "./admin-record-input.js";
 import { TASK_PHASES, TASK_STATUSES, emptyCheckpointState, type CheckpointState, type TaskPhase, type TaskStatus } from "../domain/context-os.js";
 import { installClaudeIntegration, planClaudeIntegration } from "../adapters/claude-code/integration.js";
 import { installCodexIntegration, planCodexIntegration } from "../adapters/codex/integration.js";
-import { resolveAgentRuntime } from "../platform/agent-launch.js";
+import {
+  buildPolarbearLaunchSpec, minimalAgentEnvironment, probeMcpLaunch, resolveAgentRuntime,
+} from "../platform/agent-launch.js";
 
 export { ApiError } from "./admin-errors.js";
 
-export const ADMIN_API_VERSION = "1.4";
+const INTEGRATION_HANDSHAKE_TIMEOUT_MS = 5_000;
+
+export const ADMIN_API_VERSION = "1.5";
 export const ENGINE_VERSION = VERSION;
 export const ADMIN_CAPABILITIES = [
   "projects.status",
@@ -29,6 +33,7 @@ export const ADMIN_CAPABILITIES = [
   "memories.history",
   "memories.update",
   "memories.verify",
+  "memories.reject",
   "memories.archive",
   "memories.restore",
   "memories.complete",
@@ -38,6 +43,7 @@ export const ADMIN_CAPABILITIES = [
   "memories.purge",
   "contexts.explain",
   "contexts.build",
+  "contexts.current",
   "contexts.packet_explain",
   "tasks.list",
   "tasks.get",
@@ -294,6 +300,13 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
       return store.verify(project.id, text(params.memoryId, "memoryId", 128), state, text(params.reason, "reason", 2048), "HUMAN_CLI");
     });
   }
+  if (method === "memories.reject") {
+    return withProject(params.projectRoot, (store, project) => store.reject(
+      project.id,
+      text(params.memoryId, "memoryId", 128),
+      text(params.reason, "reason", 2048),
+    ));
+  }
   if (method === "memories.archive") {
     return withProject(params.projectRoot, (store, project) => store.archive(
       project.id,
@@ -442,34 +455,75 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
       else if (integration === "claude-code") installClaudeIntegration(project, { dryRun: false, runtime });
       else throw new ApiError("INVALID_ARGUMENT", "Unsupported agent integration.");
     }
+    let codexPlan: ReturnType<typeof planCodexIntegration> | undefined;
+    let claudePlan: ReturnType<typeof planClaudeIntegration> | undefined;
+    try { codexPlan = planCodexIntegration(project, runtime); } catch { codexPlan = undefined; }
+    try { claudePlan = planClaudeIntegration(project, runtime); } catch { claudePlan = undefined; }
+    const configured = Boolean(codexPlan?.alreadyInstalled || claudePlan?.alreadyInstalled);
+    const probe = configured
+      ? await probeMcpLaunch(
+          buildPolarbearLaunchSpec(runtime, ["mcp", "--stdio", "--project-root", project.root]),
+          {
+            cwd: project.root,
+            env: minimalAgentEnvironment(process.env, process.platform, runtime.executable),
+            timeoutMs: INTEGRATION_HANDSHAKE_TIMEOUT_MS,
+          },
+        )
+      : null;
+    const connectedDetails = {
+      mcp: "CONFIGURED" as const,
+      runtime: "READY" as const,
+      handshake: probe?.ok ? "OK" as const : "FAILED" as const,
+    };
+    const unavailableDetails = {
+      mcp: "NOT_CONFIGURED" as const,
+      runtime: "READY" as const,
+      handshake: "NOT_CHECKED" as const,
+    };
     const codex = (() => {
       try {
-        const plan = planCodexIntegration(project, runtime);
-        return plan.alreadyInstalled
-          ? { id: "codex", name: "Codex", status: "CONNECTED" }
+        if (!codexPlan) throw new Error("Codex configuration is unavailable.");
+        return codexPlan.alreadyInstalled
+          ? {
+              id: "codex", name: "Codex", status: probe?.ok ? "CONNECTED" : "NEEDS_ATTENTION",
+              ...(!probe?.ok ? { detail: "HANDSHAKE_FAILED" } : {}), ...connectedDetails,
+              integrationMode: "MCP_ASSISTED", lifecycle: "UNSUPPORTED",
+            }
           : {
               id: "codex",
               name: "Codex",
               status: "NEEDS_ATTENTION",
-              detail: plan.conflict ? "CONFIGURATION_CONFLICT" : plan.migrationRequired ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+              detail: codexPlan.conflict ? "CONFIGURATION_CONFLICT" : codexPlan.migrationRequired ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+              ...unavailableDetails, integrationMode: "UNAVAILABLE", lifecycle: "UNSUPPORTED",
             };
       } catch {
-        return { id: "codex", name: "Codex", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT" };
+        return {
+          id: "codex", name: "Codex", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT",
+          ...unavailableDetails, integrationMode: "UNAVAILABLE", lifecycle: "UNSUPPORTED",
+        };
       }
     })();
     const claude = (() => {
       try {
-        const plan = planClaudeIntegration(project, runtime);
-        return plan.alreadyInstalled
-          ? { id: "claude-code", name: "Claude Code", status: "CONNECTED" }
+        if (!claudePlan) throw new Error("Claude Code configuration is unavailable.");
+        return claudePlan.alreadyInstalled
+          ? {
+              id: "claude-code", name: "Claude Code", status: probe?.ok ? "CONNECTED" : "NEEDS_ATTENTION",
+              ...(!probe?.ok ? { detail: "HANDSHAKE_FAILED" } : {}), ...connectedDetails,
+              integrationMode: "LIFECYCLE_MANAGED", lifecycle: "CONFIGURED",
+            }
           : {
               id: "claude-code",
               name: "Claude Code",
               status: "NEEDS_ATTENTION",
-              detail: plan.legacyConfiguration ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+              detail: claudePlan.legacyConfiguration ? "MIGRATION_REQUIRED" : "INSTALL_REQUIRED",
+              ...unavailableDetails, integrationMode: "UNAVAILABLE", lifecycle: "NOT_CONFIGURED",
             };
       } catch {
-        return { id: "claude-code", name: "Claude Code", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT" };
+        return {
+          id: "claude-code", name: "Claude Code", status: "NEEDS_ATTENTION", detail: "CONFIGURATION_CONFLICT",
+          ...unavailableDetails, integrationMode: "UNAVAILABLE", lifecycle: "NOT_CONFIGURED",
+        };
       }
     })();
     return {
@@ -477,11 +531,22 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
     };
   }
   if (method === "contexts.build") {
-    return withProject(params.projectRoot, (store, project) => store.contextOs().buildContext(project.id, {
+    return withProject(params.projectRoot, (store, project) => {
+      const policy = readProjectPolicy(project.configPath);
+      const requestedBudget = params.maxTokens === undefined
+        ? (policy.contextBudgetMode === "custom" ? policy.defaultContextBudget : undefined)
+        : integer(params.maxTokens, "maxTokens", 2_000, 400, 12_000);
+      return store.contextOs().buildContext(project.id, {
       currentRequest: text(params.currentRequest, "currentRequest", 16 * 1024),
       ...(optionalText(params.taskId, "taskId", 128) ? { taskId: String(params.taskId) } : {}),
-      maxTokens: integer(params.maxTokens, "maxTokens", 2_000, 400, 12_000),
+      ...(requestedBudget === undefined ? {} : { maxTokens: requestedBudget }),
       ...(optionalText(params.provider, "provider", 128) ? { provider: String(params.provider) } : {}),
+      });
+    });
+  }
+  if (method === "contexts.current") {
+    return withProject(params.projectRoot, (store, project) => ({
+      packet: store.contextOs().currentContext(project.id) ?? null,
     }));
   }
   if (method === "contexts.packet_explain") {

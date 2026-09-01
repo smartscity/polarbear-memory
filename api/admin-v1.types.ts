@@ -77,7 +77,12 @@ export type AgentIntegrationStatus = {
   id: "codex" | "claude-code";
   name: "Codex" | "Claude Code";
   status: "CONNECTED" | "NEEDS_ATTENTION";
-  detail?: "INSTALL_REQUIRED" | "MIGRATION_REQUIRED" | "CONFIGURATION_CONFLICT";
+  detail?: "INSTALL_REQUIRED" | "MIGRATION_REQUIRED" | "CONFIGURATION_CONFLICT" | "HANDSHAKE_FAILED";
+  mcp: "CONFIGURED" | "NOT_CONFIGURED";
+  runtime: "READY" | "UNAVAILABLE";
+  handshake: "OK" | "FAILED" | "NOT_CHECKED";
+  integrationMode: "LIFECYCLE_MANAGED" | "MCP_ASSISTED" | "UNAVAILABLE";
+  lifecycle: "CONFIGURED" | "NOT_CONFIGURED" | "UNSUPPORTED";
 };
 export type ContextPacketItem = {
   rank: number; sourceType: "TASK" | "CHECKPOINT" | "MEMORY"; sourceId: string; category: ContextCategory;
@@ -88,6 +93,7 @@ export type ContextPacket = {
   provider?: string; maxTokens: number; estimatedTokens: number; retrievalRunId: string; packetHash: string;
   rendered: string; items: ContextPacketItem[]; createdAt: string;
 };
+export type CurrentContextResponse = { packet: ContextPacket | null };
 export type ContextExplanation = {
   packet: ContextPacket; budgetByCategory: Record<string, { used: number; limit: number }>;
   excluded: Array<{ sourceId: string; category: ContextCategory; reason: string; estimatedTokens: number }>;

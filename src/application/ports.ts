@@ -81,6 +81,7 @@ export interface MemoryStore {
   recent(projectId: string, limit: number): MemorySearchResult[];
   list(projectId: string, options: { query?: string; status?: LifecycleStatus; type?: MemoryType; limit: number; offset: number }): Memory[];
   verify(projectId: string, memoryId: string, state: VerificationState, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP", evidence?: { anchors?: FileAnchor[]; checkedCommit?: string }): Memory;
+  reject(projectId: string, memoryId: string, reason: string): Memory;
   archive(projectId: string, memoryId: string, reason: string, actor?: "HUMAN_CLI" | "AGENT_MCP"): Memory;
   restore(projectId: string, memoryId: string, reason: string): Memory;
   complete(projectId: string, memoryId: string, state: Exclude<CompletionState, "OPEN">, reason: string, now?: Date): Memory;

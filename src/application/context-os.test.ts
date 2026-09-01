@@ -62,6 +62,35 @@ test("Context Planner keeps packets bounded and preserves inspectable provenance
   }
 });
 
+test("automatic Context budgets scale with available task and Memory context", () => {
+  const store = fixture();
+  try {
+    const small = store.contextOs().buildContext(PROJECT_ID, { currentRequest: "Explain this file." });
+    const task = store.contextOs().createTask(PROJECT_ID, {
+      title: "Review architecture",
+      objective: "Review the complete Context OS architecture and its safety constraints.",
+      phase: "REVIEW",
+    });
+    for (let index = 0; index < 20; index += 1) {
+      store.record(PROJECT_ID, {
+        type: index % 2 === 0 ? "DECISION" : "ARCHITECTURE",
+        summary: `Architecture fact ${index}`,
+        content: `Detailed reusable Context OS information ${index}. `.repeat(20),
+        importance: 800,
+      });
+    }
+    const large = store.contextOs().buildContext(PROJECT_ID, {
+      taskId: task.id,
+      currentRequest: "Compare every relevant decision, constraint, architecture boundary, and previous implementation result.",
+    });
+    assert.ok(small.maxTokens >= 500 && small.maxTokens <= 8_000);
+    assert.ok(large.maxTokens > small.maxTokens);
+    assert.equal(store.contextOs().currentContext(PROJECT_ID)?.id, large.id);
+  } finally {
+    store.close();
+  }
+});
+
 test("Rotation policy is deterministic and requires a checkpoint boundary", () => {
   const store = fixture();
   try {

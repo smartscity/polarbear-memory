@@ -160,10 +160,19 @@ export class KnowledgeCommandService {
     const now = new Date().toISOString();
     inImmediateTransaction(this.#database, () => {
       this.#database.prepare(`
-        UPDATE knowledge_units SET summary = ?, body = ?, current_content_hash = ?, verification_state = 'UNVERIFIED',
+        UPDATE knowledge_units SET summary = ?, body = ?, current_content_hash = ?,
+          verification_state = 'VERIFIED', correctness_risk = 'LOW', confidence_milli = 1000,
           updated_at = ? WHERE project_id = ? AND id = ?
       `).run(summary, content, hash, now, projectId, memoryId);
       this.#knowledge.appendRevision({ ...current, summary, content }, `edit:${input.reason.trim()}`, "HUMAN_CLI", now);
+      this.#knowledge.recordVerificationEvidence(
+        projectId,
+        memoryId,
+        "VERIFIED",
+        input.reason,
+        current.lastCheckedCommit,
+        now,
+      );
       this.#knowledge.refreshIndex(memoryId);
     });
     const updated = this.#knowledge.get(projectId, memoryId);

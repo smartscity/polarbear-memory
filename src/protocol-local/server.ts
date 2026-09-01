@@ -22,6 +22,7 @@ import {
 export { ADMIN_API_VERSION, ADMIN_CAPABILITIES, ENGINE_VERSION } from "./admin-router.js";
 
 const MAX_FRAME_BYTES = 1024 * 1024;
+const ADMIN_REQUEST_TIMEOUT_MS = 15_000;
 const SERVICE_DIRECTORY_MODE = 0o700;
 const SERVICE_FILE_MODE = 0o600;
 
@@ -95,7 +96,7 @@ function writeResponse(socket: Socket, response: AdminResponse): void {
 }
 
 function handleSocket(socket: Socket, token: string, shutdown: () => void): void {
-  socket.setTimeout(5_000, () => socket.destroy());
+  socket.setTimeout(ADMIN_REQUEST_TIMEOUT_MS, () => socket.destroy());
   let bytes = 0;
   let input = "";
   socket.setEncoding("utf8");

@@ -95,6 +95,10 @@ export class ContextOsService implements ContextOsPort {
     return this.#planner.build(projectId, input);
   }
 
+  currentContext(projectId: string): ContextPacket | undefined {
+    return this.#packets.latest(projectId);
+  }
+
   explainContext(projectId: string, packetId: string): ContextExplanation {
     return this.#packets.explain(projectId, packetId);
   }
@@ -106,8 +110,8 @@ export class ContextOsService implements ContextOsPort {
     return this.#telemetry.recordObservation(projectId, input);
   }
 
-  distill(projectId: string, limit?: number) {
-    return this.#distiller.distill(projectId, limit);
+  distill(projectId: string, limit?: number, sessionRefHash?: string) {
+    return this.#distiller.distill(projectId, limit, sessionRefHash);
   }
 
   recordUsage(
