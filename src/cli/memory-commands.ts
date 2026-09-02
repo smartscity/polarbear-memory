@@ -7,6 +7,7 @@ import { compileContext } from "../application/context.js";
 import { runMaintenance } from "../application/maintenance.js";
 import { planClaudeIntegration, readClaudeLaunchSpec } from "../adapters/claude-code/integration.js";
 import { planCodexIntegration, readCodexLaunchSpec } from "../adapters/codex/integration.js";
+import { planCodexAppServerIntegration, readCodexAppServerLaunchSpec } from "../adapters/codex/app-server-integration.js";
 import { parseMemoryType } from "../domain/memory.js";
 import { captureFileAnchors } from "../platform/anchors.js";
 import { discoverGitContext, normalizeRepoFile } from "../platform/git.js";
@@ -14,7 +15,7 @@ import { loadProject } from "../platform/project.js";
 import { CURRENT_SCHEMA_VERSION, SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { VERSION } from "../version.js";
 import {
-  minimalAgentEnvironment, probeMcpLaunch, resolveAgentRuntime, sanitizeAgentDiagnostic, validateAgentLaunchSpec,
+  minimalAgentEnvironment, probeCodexAppServerLaunch, probeMcpLaunch, resolveAgentRuntime, sanitizeAgentDiagnostic, validateAgentLaunchSpec,
   type AgentLaunchSpec,
 } from "../platform/agent-launch.js";
 import { diagnoseRuntimeLaunchDescriptor } from "../platform/runtime-descriptor.js";
@@ -357,15 +358,31 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
   if (!runtimeDescriptor.current) console.log("  Run: polarbear-memory install");
   const integration = planClaudeIntegration(project);
   const codexIntegration = planCodexIntegration(project);
+  const codexAppServerIntegration = planCodexAppServerIntegration(project);
   const claudeSpec = readClaudeLaunchSpec(project);
   const codexSpec = readCodexLaunchSpec(project);
+  const codexAppServerSpec = readCodexAppServerLaunchSpec(project);
   const claudeStatus = integration.alreadyInstalled ? "OK" : claudeSpec ? "STALE" : "NOT INSTALLED";
   const codexStatus = codexIntegration.alreadyInstalled
     ? "OK"
     : codexIntegration.conflict ? "CONFLICT" : codexSpec ? "STALE" : "NOT INSTALLED";
   const claudeDiagnostics = await reportAgentIntegration("Claude MCP", claudeStatus, claudeSpec, project.root);
   const codexDiagnostics = await reportAgentIntegration("Codex MCP", codexStatus, codexSpec, project.root);
-  if (!runtimeDescriptor.current || !claudeDiagnostics.healthy || !codexDiagnostics.healthy) process.exitCode = 1;
+  const codexAppServerValidation = codexAppServerSpec ? validateAgentLaunchSpec(codexAppServerSpec) : undefined;
+  const codexAppServerProbe = codexAppServerIntegration.alreadyInstalled && codexAppServerSpec && codexAppServerValidation?.ok
+    ? await probeCodexAppServerLaunch(codexAppServerSpec, { cwd: project.root, env: minimalAgentEnvironment() })
+    : undefined;
+  const codexAppServerReady = codexAppServerProbe?.ok ?? false;
+  console.log(`Claude lifecycle          ${integration.alreadyInstalled ? "LIFECYCLE_MANAGED" : "UNAVAILABLE"}`);
+  console.log(`Claude lifecycle events   ${integration.alreadyInstalled ? "OK" : "NOT CONFIGURED"}`);
+  console.log(`Claude prompt injection   ${integration.alreadyInstalled ? "OK" : "NOT CONFIGURED"}`);
+  console.log(`Claude event spool        ${integration.alreadyInstalled ? "OK" : "NOT CONFIGURED"}`);
+  console.log(`Codex lifecycle mode      ${codexIntegration.alreadyInstalled ? "MCP_ASSISTED" : "UNAVAILABLE"}`);
+  console.log(`Codex App Server adapter  ${codexAppServerReady ? "LIFECYCLE_MANAGED" : codexAppServerIntegration.conflict ? "CONFLICT" : codexAppServerProbe ? "HANDSHAKE_FAILED" : codexAppServerIntegration.alreadyInstalled ? "INVALID" : "NOT_INSTALLED"}`);
+  if (codexAppServerValidation && !codexAppServerValidation.ok) console.log(`  ${sanitizeAgentDiagnostic(codexAppServerValidation.detail)}`);
+  if (codexAppServerProbe && !codexAppServerProbe.ok) console.log(`  ${codexAppServerProbe.kind}: ${sanitizeAgentDiagnostic(codexAppServerProbe.detail)}`);
+  if (!runtimeDescriptor.current || !claudeDiagnostics.healthy || !codexDiagnostics.healthy
+    || (codexAppServerIntegration.alreadyInstalled && !codexAppServerReady)) process.exitCode = 1;
   console.log("Network      disabled by design");
   if (parsed.values.export) {
     const diagnosticsDirectory = join(project.dataDir, "diagnostics");
@@ -386,9 +403,16 @@ export async function doctor(cwd: string, args: string[]): Promise<void> {
         claudeInstalled: claudeDiagnostics.configured,
         claudeExecutable: claudeDiagnostics.executable,
         claudeHandshake: claudeDiagnostics.handshake,
+        claudeMode: integration.alreadyInstalled ? "LIFECYCLE_MANAGED" : "UNAVAILABLE",
         codexInstalled: codexDiagnostics.configured,
         codexExecutable: codexDiagnostics.executable,
         codexHandshake: codexDiagnostics.handshake,
+        codexMode: codexIntegration.alreadyInstalled ? "MCP_ASSISTED" : "UNAVAILABLE",
+        codexLifecycle: "UNSUPPORTED",
+        codexAppServerInstalled: codexAppServerIntegration.alreadyInstalled,
+        codexAppServerExecutable: codexAppServerValidation?.ok ?? false,
+        codexAppServerHandshake: codexAppServerProbe?.ok ?? false,
+        codexAppServerMode: codexAppServerReady ? "LIFECYCLE_MANAGED" : "UNAVAILABLE",
         codexConflict: codexIntegration.conflict,
       },
       runtimeDescriptor: {

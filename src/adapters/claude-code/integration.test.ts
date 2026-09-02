@@ -33,8 +33,12 @@ const arbitraryRuntime: AgentRuntime = {
 test("Claude integration dry-run is non-mutating and install preserves other MCP servers", () => {
   const { temporary, project } = fixture();
   const mcpPath = join(project.root, ".mcp.json");
+  const settingsPath = join(project.root, ".claude", "settings.json");
   const original = `${JSON.stringify({ mcpServers: { existing: { command: "existing-server", args: [] } } }, null, 2)}\n`;
+  const originalSettings = `${JSON.stringify({ permissions: { allow: ["mcp__existing__read"] } }, null, 2)}\n`;
   writeFileSync(mcpPath, original);
+  mkdirSync(join(project.root, ".claude"), { recursive: true });
+  writeFileSync(settingsPath, originalSettings);
   try {
     installClaudeIntegration(project, { dryRun: true });
     assert.equal(readFileSync(mcpPath, "utf8"), original);
@@ -45,15 +49,21 @@ test("Claude integration dry-run is non-mutating and install preserves other MCP
     assert.ok(config.mcpServers.existing);
     assert.ok(config.mcpServers["polarbear-memory"]);
     assert.match(readFileSync(join(project.root, ".claude", "rules", "polarbear-memory.md"), "utf8"), /context_get/);
-    const settings = JSON.parse(readFileSync(join(project.root, ".claude", "settings.json"), "utf8")) as {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
       hooks: { Stop: unknown[]; SessionEnd: unknown[] };
+      permissions: { allow: string[] };
     };
     assert.equal(settings.hooks.Stop.length, 1);
     assert.equal(settings.hooks.SessionEnd.length, 1);
+    assert.ok(settings.permissions.allow.includes("mcp__existing__read"));
+    assert.ok(settings.permissions.allow.includes("mcp__polarbear-memory__decision_record"));
+    assert.equal(settings.permissions.allow.length, 14);
+    assert.equal(settings.permissions.allow.includes("mcp__polarbear-memory__*"), false);
     assert.equal(planClaudeIntegration(project).alreadyInstalled, true);
 
     restoreLatestClaudeIntegration(project);
     assert.equal(readFileSync(mcpPath, "utf8"), original);
+    assert.equal(readFileSync(settingsPath, "utf8"), originalSettings);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
@@ -115,12 +125,18 @@ test("Claude uninstall is previewable and removes only managed entries", () => {
     writeFileSync(mcpPath, `${JSON.stringify({ mcpServers: { existing: { command: "keep-me" } } }, null, 2)}\n`);
     installClaudeIntegration(project, { dryRun: false });
     const settingsPath = join(project.root, ".claude", "settings.json");
-    const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as { hooks: { Stop: unknown[] } };
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      hooks: { Stop: unknown[] };
+      permissions: { allow: string[] };
+    };
     settings.hooks.Stop.unshift({ hooks: [{ type: "command", command: "keep-me", timeout: 2 }] });
+    settings.permissions.allow.push("mcp__existing__read");
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 
     const preview = uninstallClaudeIntegration(project, { dryRun: true });
-    assert.deepEqual(preview.plan, { mcpEntry: true, hooks: 8, managedRule: true, modifiedRulePreserved: false });
+    assert.deepEqual(preview.plan, {
+      mcpEntry: true, hooks: 11, permissions: 13, managedRule: true, modifiedRulePreserved: false,
+    });
     assert.ok((JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["polarbear-memory"]);
 
     const result = uninstallClaudeIntegration(project, { dryRun: false });
@@ -128,9 +144,13 @@ test("Claude uninstall is previewable and removes only managed entries", () => {
     const mcp = JSON.parse(readFileSync(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
     assert.ok(mcp.mcpServers.existing);
     assert.equal(mcp.mcpServers["polarbear-memory"], undefined);
-    const nextSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as { hooks: { Stop: unknown[]; SessionEnd: unknown[] } };
+    const nextSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      hooks: { Stop: unknown[]; SessionEnd: unknown[] };
+      permissions: { allow: string[] };
+    };
     assert.equal(nextSettings.hooks.Stop.length, 1);
     assert.equal(nextSettings.hooks.SessionEnd.length, 0);
+    assert.deepEqual(nextSettings.permissions.allow, ["mcp__existing__read"]);
     assert.throws(() => readFileSync(join(project.root, ".claude", "rules", "polarbear-memory.md"), "utf8"), /ENOENT/);
   } finally {
     rmSync(temporary, { recursive: true, force: true });

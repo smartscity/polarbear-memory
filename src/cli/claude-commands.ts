@@ -50,8 +50,13 @@ export async function runHookCommand(cwd: string, args: string[]): Promise<void>
     if (!raw || typeof raw !== "object" || (raw as { hook_event_name?: unknown }).hook_event_name !== parsed.values.event) return;
     const { ingestClaudeHook } = await import("../adapters/claude-code/hooks.js");
     const result = ingestClaudeHook(raw, cwd);
-    if (parsed.values.event === "SessionStart" && result.additionalContext) {
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: result.additionalContext } }));
+    if ((parsed.values.event === "SessionStart" || parsed.values.event === "UserPromptSubmit") && result.additionalContext) {
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: parsed.values.event,
+          additionalContext: result.additionalContext,
+        },
+      }));
     }
   } catch {
     // Hooks are observational and must never block Claude Code or write protocol noise.

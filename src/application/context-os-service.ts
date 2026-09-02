@@ -1,5 +1,5 @@
 import type {
-  ContextOsMetrics, ContextOsPort, ContextPacket, ContextExplanation, Observation, RotationContext,
+  ContextOsMetrics, ContextOsPort, ContextPacket, ContextExplanation, LifecycleMetrics, Observation, RotationContext,
   RotationDecision, Task, TaskStatus, UsageLedgerEntry,
 } from "../domain/context-os.js";
 import type { MemorySearchResult } from "../domain/memory.js";
@@ -123,6 +123,14 @@ export class ContextOsService implements ContextOsPort {
 
   metrics(projectId: string, taskId?: string): ContextOsMetrics {
     return this.#telemetry.metrics(projectId, taskId);
+  }
+
+  recordLifecycleMetric(projectId: string, input: Parameters<ContextOsPort["recordLifecycleMetric"]>[1]): void {
+    this.#telemetry.recordLifecycleMetric(projectId, input);
+  }
+
+  lifecycleMetrics(projectId: string): LifecycleMetrics {
+    return this.#telemetry.lifecycleMetrics(projectId);
   }
 
   decideRotation(input: RotationContext): RotationDecision {

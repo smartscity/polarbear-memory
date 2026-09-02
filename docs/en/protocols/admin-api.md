@@ -28,7 +28,7 @@ The contract currently covers:
 - context compilation, latest-packet retrieval, and explanation;
 - Task creation, checkpoint history, execution history, and run context;
 - persisted agent connection/activity summaries plus managed Codex and Claude Code configuration, runtime, handshake health, lifecycle capability, effective integration mode, and repair;
-- observation distillation and usage metrics;
+- observation distillation, Context OS usage metrics, and lifecycle counters/latency;
 - maintenance preview/application;
 - backup list, create, verify, restore preview, and restore;
 - durable knowledge promotion preview/application.

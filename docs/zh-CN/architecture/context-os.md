@@ -50,7 +50,9 @@ Provider-neutral `LifecycleOrchestrator` 把 lifecycle event 映射到已有 Con
 
 当前 distiller 只提取明确标记的 decision、pitfall、task state 和 next step，不声称能理解任意 tool output。
 
-Codex 项目集成仍为 MCP-assisted，因为 stock Codex 没有向 Polarbear 暴露等价的项目 hook surface。Lifecycle-managed Codex 需要由 Polarbear 控制 App Server client，以便拦截 `turn/start` 并消费 thread、turn 和 item event；当前实现不宣称具备该 adapter。Admin API 会明确报告 `LIFECYCLE_MANAGED`、`MCP_ASSISTED` 或 `UNAVAILABLE`。
+Stock Codex 项目集成仍为 MCP-assisted，因为它没有向 Polarbear 暴露等价的项目 hook surface。可选的 Polarbear Codex App Server gateway 是独立、显式安装的 managed path：它代理官方双向 JSONL protocol，在 `turn/start` 和 `turn/steer` 之前注入 Context，消费 thread/turn/item 与 compaction notification，并原样转发 approval 和 provider response。只有通过该 descriptor 启动的 client 才是 lifecycle-managed；普通 Codex CLI/Desktop session 仍为 MCP-assisted。
+
+Lifecycle telemetry 使用有界聚合 counter，而不是无限增长的 event log。它报告 provider/event 分布、accepted 与 fail-open outcome、spool replay、retrieval 与 hook latency、注入 token 估算、observation processing、checkpoint reason，以及 hook 自动持久化的 Memory。Schema v9 增加有界 lifecycle counter；迁移保持 additive，并具备 backup、transaction 与 foreign-key check。
 
 ## Managed runtime 与 rotation
 

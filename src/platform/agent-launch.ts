@@ -125,6 +125,8 @@ interface McpProbeOptions {
   timeoutMs?: number;
 }
 
+type JsonlProbeProtocol = "MCP" | "Codex App Server";
+
 function closesWithin(closePromise: Promise<void>, milliseconds: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), milliseconds);
@@ -149,6 +151,7 @@ class McpLaunchProbeSession {
     spec: AgentLaunchSpec,
     options: McpProbeOptions,
     private readonly resolve: (result: AgentLaunchProbe) => void,
+    private readonly protocol: JsonlProbeProtocol = "MCP",
   ) {
     this.child = spawn(spec.command, spec.args, {
       cwd: options.cwd,
@@ -165,25 +168,25 @@ class McpLaunchProbeSession {
     this.initializeTimer = setTimeout(() => this.finish({
       ok: false,
       kind: "INITIALIZE_TIMEOUT",
-      detail: `MCP initialize timed out after ${this.timeoutMs} ms${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
+      detail: `${this.protocol} initialize timed out after ${this.timeoutMs} ms${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
     }), this.timeoutMs);
     this.child.once("error", (error) => this.finish({
       ok: false,
       kind: "SPAWN_FAILURE",
-      detail: `MCP spawn failed: ${error.message}`,
+      detail: `${this.protocol} spawn failed: ${error.message}`,
     }));
     this.child.once("exit", (code, signal) => {
       if (!this.finalizing) this.finish({
         ok: false,
         kind: "EARLY_EXIT",
-        detail: `MCP process exited before initialize completed (code=${String(code)}, signal=${String(signal)})${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
+        detail: `${this.protocol} process exited before initialize completed (code=${String(code)}, signal=${String(signal)})${this.stderr.trim() ? `: ${this.stderr.trim()}` : "."}`,
       });
     });
     this.child.stdin.on("error", (error) => {
       if (!this.finalizing) this.finish({
         ok: false,
         kind: "IO_FAILURE",
-        detail: `MCP initialize request could not be written: ${error.message}`,
+        detail: `${this.protocol} initialize request could not be written: ${error.message}`,
       });
     });
     this.child.stderr.setEncoding("utf8");
@@ -191,15 +194,15 @@ class McpLaunchProbeSession {
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => this.handleStdout(chunk));
     // EOF is an MCP client disconnect, so keep stdin open until initialize has answered.
-    this.child.stdin.write(`${JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
+    this.child.stdin.write(`${JSON.stringify(this.protocol === "MCP" ? {
+      jsonrpc: "2.0", id: 1, method: "initialize",
       params: {
-        protocolVersion: LATEST_PROTOCOL_VERSION,
-        capabilities: {},
+        protocolVersion: LATEST_PROTOCOL_VERSION, capabilities: {},
         clientInfo: { name: "polarbear-memory-doctor", version: "1" },
       },
+    } : {
+      id: 1, method: "initialize",
+      params: { clientInfo: { name: "polarbear_memory", title: "Polarbear Memory", version: "1" } },
     })}\n`);
   }
 
@@ -213,7 +216,7 @@ class McpLaunchProbeSession {
       newline = this.stdout.indexOf("\n");
     }
     if (this.stdout.length > 256 * 1_024) {
-      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout exceeded the protocol frame limit." });
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: `${this.protocol} stdout exceeded the protocol frame limit.` });
     }
   }
 
@@ -222,22 +225,22 @@ class McpLaunchProbeSession {
     try {
       parsed = JSON.parse(line);
     } catch {
-      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout contained a non-JSON protocol line." });
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: `${this.protocol} stdout contained a non-JSON protocol line.` });
       return false;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: "MCP stdout contained a non-object protocol message." });
+      this.finish({ ok: false, kind: "PROTOCOL_ERROR", detail: `${this.protocol} stdout contained a non-object protocol message.` });
       return false;
     }
     const message = parsed as { id?: unknown; result?: { serverInfo?: unknown }; error?: { message?: unknown } };
     if (message.id !== 1) return true;
-    if (!message.result?.serverInfo) {
+    if (!message.result || (this.protocol === "MCP" && !message.result.serverInfo)) {
       this.finish({
         ok: false,
         kind: "PROTOCOL_ERROR",
         detail: message.error
-          ? `MCP initialize returned an error: ${String(message.error.message ?? "unknown error")}`
-          : "MCP initialize response did not contain serverInfo.",
+          ? `${this.protocol} initialize returned an error: ${String(message.error.message ?? "unknown error")}`
+          : this.protocol === "MCP" ? "MCP initialize response did not contain serverInfo." : "Codex App Server initialize response did not contain a result.",
       });
       return false;
     }
@@ -246,10 +249,12 @@ class McpLaunchProbeSession {
   }
 
   private sendInitializedNotification(): void {
-    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`, (error) => {
+    this.child.stdin.write(`${JSON.stringify(this.protocol === "MCP"
+      ? { jsonrpc: "2.0", method: "notifications/initialized" }
+      : { method: "initialized" })}\n`, (error) => {
       this.finish(error
-        ? { ok: false, kind: "IO_FAILURE", detail: `MCP initialized notification could not be written: ${error.message}` }
-        : { ok: true, kind: "SUCCESS", detail: "MCP initialize succeeded and diagnostic child cleanup completed." });
+        ? { ok: false, kind: "IO_FAILURE", detail: `${this.protocol} initialized notification could not be written: ${error.message}` }
+        : { ok: true, kind: "SUCCESS", detail: `${this.protocol} initialize succeeded and diagnostic child cleanup completed.` });
     });
   }
 
@@ -271,7 +276,7 @@ class McpLaunchProbeSession {
     this.resolve({
       ok: false,
       kind: "CLEANUP_FAILURE",
-      detail: `MCP child cleanup failed after ${result.kind}: ${result.detail}`,
+      detail: `${this.protocol} child cleanup failed after ${result.kind}: ${result.detail}`,
       pid: this.pid,
     });
   }
@@ -279,4 +284,8 @@ class McpLaunchProbeSession {
 
 export function probeMcpLaunch(spec: AgentLaunchSpec, options: McpProbeOptions): Promise<AgentLaunchProbe> {
   return new Promise((resolve) => new McpLaunchProbeSession(spec, options, resolve).start());
+}
+
+export function probeCodexAppServerLaunch(spec: AgentLaunchSpec, options: McpProbeOptions): Promise<AgentLaunchProbe> {
+  return new Promise((resolve) => new McpLaunchProbeSession(spec, options, resolve, "Codex App Server").start());
 }

@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { ContextOsMetrics, Observation, UsageLedgerEntry } from "../domain/context-os.js";
+import type {
+  ContextOsMetrics, LifecycleMetricOutcome, LifecycleMetrics, Observation, UsageLedgerEntry,
+} from "../domain/context-os.js";
 
 interface ObservationRow {
   id: string; project_id: string; task_id: string | null; execution_run_id: string | null;
@@ -66,17 +68,113 @@ export class ContextTelemetryRepository {
     return { id, projectId, ...input, createdAt };
   }
 
-  pendingObservations(projectId: string, limit: number): Observation[] {
-    const rows = this.#database.prepare(`
-      SELECT * FROM observations WHERE project_id = ? AND persisted_as_memory = 0
-      ORDER BY importance_milli DESC, occurred_at, id LIMIT ?
-    `).all(projectId, limit) as unknown as ObservationRow[];
+  pendingObservations(projectId: string, limit: number, sessionRefHash?: string): Observation[] {
+    const rows = (sessionRefHash
+      ? this.#database.prepare(`
+          SELECT * FROM observations
+          WHERE project_id = ? AND persisted_as_memory = 0
+            AND json_extract(payload_redacted_json, '$.sessionRefHash') = ?
+          ORDER BY importance_milli DESC, occurred_at, id LIMIT ?
+        `).all(projectId, sessionRefHash, limit)
+      : this.#database.prepare(`
+          SELECT * FROM observations WHERE project_id = ? AND persisted_as_memory = 0
+          ORDER BY importance_milli DESC, occurred_at, id LIMIT ?
+        `).all(projectId, limit)) as unknown as ObservationRow[];
     return rows.map((row) => this.#fromObservationRow(row));
   }
 
   markDistilled(projectId: string, observationIds: string[]): void {
     const update = this.#database.prepare("UPDATE observations SET persisted_as_memory = 1 WHERE project_id = ? AND id = ?");
     for (const id of observationIds) update.run(projectId, id);
+  }
+
+  recordLifecycleMetric(projectId: string, input: {
+    provider: string; eventType: string; outcome: LifecycleMetricOutcome; latencyMs?: number;
+  }): void {
+    const latencyMs = input.latencyMs ?? 0;
+    if (!Number.isInteger(latencyMs) || latencyMs < 0 || latencyMs > 600_000) throw new Error("Lifecycle latency must be between 0 and 600000 ms.");
+    this.#database.prepare(`
+      INSERT INTO lifecycle_counters(
+        project_id, provider, event_type, outcome, event_count, total_latency_ms, max_latency_ms, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      ON CONFLICT(project_id, provider, event_type, outcome) DO UPDATE SET
+        event_count = event_count + 1,
+        total_latency_ms = total_latency_ms + excluded.total_latency_ms,
+        max_latency_ms = max(max_latency_ms, excluded.max_latency_ms),
+        updated_at = excluded.updated_at
+    `).run(projectId, input.provider, input.eventType, input.outcome, latencyMs, latencyMs, new Date().toISOString());
+  }
+
+  lifecycleMetrics(projectId: string): LifecycleMetrics {
+    const observationRows = this.#database.prepare(`
+      SELECT provider, event_type, count(*) AS count
+      FROM observations WHERE project_id = ? GROUP BY provider, event_type ORDER BY provider, event_type
+    `).all(projectId) as Array<{ provider: string; event_type: string; count: number }>;
+    const eventsByProvider: Record<string, number> = {};
+    const eventsByType: Record<string, number> = {};
+    let eventsAccepted = 0;
+    for (const row of observationRows) {
+      eventsAccepted += row.count;
+      eventsByProvider[row.provider] = (eventsByProvider[row.provider] ?? 0) + row.count;
+      eventsByType[row.event_type] = (eventsByType[row.event_type] ?? 0) + row.count;
+    }
+    const counterRows = this.#database.prepare(`
+      SELECT outcome, coalesce(sum(event_count), 0) AS count,
+        coalesce(sum(total_latency_ms), 0) AS total_latency_ms,
+        coalesce(max(max_latency_ms), 0) AS max_latency_ms
+      FROM lifecycle_counters WHERE project_id = ? GROUP BY outcome
+    `).all(projectId) as Array<{
+      outcome: LifecycleMetricOutcome; count: number; total_latency_ms: number; max_latency_ms: number;
+    }>;
+    const counter = (outcome: LifecycleMetricOutcome) => counterRows.find((row) => row.outcome === outcome);
+    const accepted = counter("ACCEPTED");
+    const observations = this.#database.prepare(`
+      SELECT count(*) AS total, coalesce(sum(CASE WHEN persisted_as_memory = 0 THEN 1 ELSE 0 END), 0) AS pending
+      FROM observations WHERE project_id = ?
+    `).get(projectId) as { total: number; pending: number };
+    const retrieval = this.#database.prepare(`
+      SELECT count(*) AS runs, coalesce(avg(latency_ms), 0) AS average_latency_ms
+      FROM retrieval_runs WHERE project_id = ?
+    `).get(projectId) as { runs: number; average_latency_ms: number };
+    const p95Offset = retrieval.runs > 0 ? Math.ceil(retrieval.runs * 0.95) - 1 : 0;
+    const p95 = retrieval.runs > 0
+      ? (this.#database.prepare(`
+          SELECT latency_ms FROM retrieval_runs WHERE project_id = ? ORDER BY latency_ms LIMIT 1 OFFSET ?
+        `).get(projectId, p95Offset) as { latency_ms: number } | undefined)?.latency_ms ?? 0
+      : 0;
+    const packets = this.#database.prepare(`
+      SELECT count(*) AS count, coalesce(sum(estimated_tokens), 0) AS tokens
+      FROM context_packets WHERE project_id = ?
+    `).get(projectId) as { count: number; tokens: number };
+    const checkpoints = this.#database.prepare(`
+      SELECT count(*) AS count,
+        coalesce(sum(CASE WHEN summary LIKE 'Compaction checkpoint:%'
+          OR summary LIKE 'Compaction boundary checkpoint%' THEN 1 ELSE 0 END), 0) AS compaction_count
+      FROM checkpoints WHERE project_id = ?
+    `).get(projectId) as { count: number; compaction_count: number };
+    const hookMemories = this.#database.prepare(`
+      SELECT count(*) AS count FROM memory_projection WHERE project_id = ? AND source_type = 'HOOK'
+    `).get(projectId) as { count: number };
+    return {
+      eventsAccepted,
+      eventsSpooled: counter("SPOOLED")?.count ?? 0,
+      eventsReplayed: counter("REPLAYED")?.count ?? 0,
+      failOpenOutcomes: counter("FAIL_OPEN")?.count ?? 0,
+      eventsByProvider,
+      eventsByType,
+      observationsPending: observations.pending,
+      observationsProcessed: observations.total - observations.pending,
+      retrievalRuns: retrieval.runs,
+      contextPacketsInjected: packets.count,
+      injectedEstimatedTokens: packets.tokens,
+      averageRetrievalLatencyMs: retrieval.average_latency_ms,
+      p95RetrievalLatencyMs: p95,
+      averageHookLatencyMs: accepted && accepted.count > 0 ? accepted.total_latency_ms / accepted.count : 0,
+      maxHookLatencyMs: accepted?.max_latency_ms ?? 0,
+      checkpointsCreated: checkpoints.count,
+      compactionCheckpointsCreated: checkpoints.compaction_count,
+      hookMemoriesPersisted: hookMemories.count,
+    };
   }
 
   metrics(projectId: string, taskId?: string): ContextOsMetrics {

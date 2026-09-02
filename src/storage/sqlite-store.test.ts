@@ -265,7 +265,7 @@ test("migrates an MVP-0 database before accepting MCP and hook sources", () => {
   }
 });
 
-test("migrates schema v7 to Context OS v8 without changing existing knowledge", () => {
+test("migrates schema v7 to lifecycle-aware Context OS v9 without changing existing knowledge", () => {
   const directory = mkdtempSync(join(tmpdir(), "polarbear-memory-v7-"));
   temporaryDirectories.push(directory);
   const path = join(directory, "memory.db");
@@ -284,10 +284,11 @@ test("migrates schema v7 to Context OS v8 without changing existing knowledge", 
     DROP TABLE retrieval_runs;
     DROP TABLE checkpoints;
     DROP TABLE observations;
+    DROP TABLE lifecycle_counters;
     DROP TABLE execution_runs;
     DROP TABLE agent_sessions;
     DROP TABLE tasks;
-    DELETE FROM schema_migrations WHERE version = 8;
+    DELETE FROM schema_migrations WHERE version IN (8, 9);
   `);
   v7.close();
 
@@ -295,7 +296,7 @@ test("migrates schema v7 to Context OS v8 without changing existing knowledge", 
   try {
     assert.equal(migrated.get(projectId, memory.id)?.summary, "Preserve schema v7 knowledge");
     const task = migrated.contextOs().createTask(projectId, {
-      title: "Validate migration", objective: "Verify the additive v8 migration.",
+      title: "Validate migration", objective: "Verify the additive v9 migration.",
     });
     assert.equal(migrated.contextOs().getTask(projectId, task.id)?.id, task.id);
   } finally {
@@ -304,7 +305,8 @@ test("migrates schema v7 to Context OS v8 without changing existing knowledge", 
   assert.equal(readdirSync(join(directory, "backups", "migrations")).filter((name) => name.endsWith(".db")).length, 1);
   const verified = new DatabaseSync(path, { readOnly: true });
   try {
-    assert.equal((verified.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 8);
+    assert.equal((verified.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 9);
+    assert.ok(verified.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lifecycle_counters'").get());
     assert.equal(verified.prepare("PRAGMA foreign_key_check").all().length, 0);
   } finally {
     verified.close();

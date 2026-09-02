@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import {
   buildPolarbearLaunchSpec, minimalAgentEnvironment, resolveAgentRuntime, sanitizeAgentDiagnostic,
-  probeMcpLaunch, serializeShellCommand,
+  probeCodexAppServerLaunch, probeMcpLaunch, serializeShellCommand,
 } from "./agent-launch.js";
 
 test("runtime resolution uses the current process and package-owned CLI artifact", () => {
@@ -80,6 +80,19 @@ test("MCP probe keeps stdin open until initialize completes and waits for child 
   assert.equal(result.ok, true);
   assert.ok(result.pid);
   assert.throws(() => process.kill(result.pid as number, 0));
+});
+
+test("Codex App Server probe uses the official initialize and initialized message shapes", async () => {
+  const fixture = [
+    "let input='';process.stdin.on('data',(chunk)=>{input+=chunk;const lines=input.split('\\n');input=lines.pop();for(const line of lines){const message=JSON.parse(line);if(message.method==='initialize')process.stdout.write(JSON.stringify({id:message.id,result:{userAgent:'fixture'}})+'\\n');if(message.method==='initialized')process.exit(0);}});",
+    "process.stdin.resume();",
+  ].join("");
+  const result = await probeCodexAppServerLaunch(
+    { command: process.execPath, args: ["-e", fixture] },
+    { cwd: process.cwd(), timeoutMs: 1_000 },
+  );
+  assert.equal(result.kind, "SUCCESS", result.detail);
+  assert.equal(result.ok, true);
 });
 
 test("MCP probe distinguishes spawn, exit, timeout, and protocol failures", async () => {

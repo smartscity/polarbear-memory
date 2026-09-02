@@ -186,6 +186,29 @@ export interface ContextOsMetrics {
   averageAssemblyLatencyMs: number;
 }
 
+export type LifecycleMetricOutcome = "ACCEPTED" | "REJECTED" | "SPOOLED" | "REPLAYED" | "FAIL_OPEN";
+
+export interface LifecycleMetrics {
+  eventsAccepted: number;
+  eventsSpooled: number;
+  eventsReplayed: number;
+  failOpenOutcomes: number;
+  eventsByProvider: Record<string, number>;
+  eventsByType: Record<string, number>;
+  observationsPending: number;
+  observationsProcessed: number;
+  retrievalRuns: number;
+  contextPacketsInjected: number;
+  injectedEstimatedTokens: number;
+  averageRetrievalLatencyMs: number;
+  p95RetrievalLatencyMs: number;
+  averageHookLatencyMs: number;
+  maxHookLatencyMs: number;
+  checkpointsCreated: number;
+  compactionCheckpointsCreated: number;
+  hookMemoriesPersisted: number;
+}
+
 export interface RotationContext {
   taskChanged?: boolean;
   phaseChanged?: boolean;
@@ -227,6 +250,8 @@ export interface ContextOsPort {
   distill(projectId: string, limit?: number, sessionRefHash?: string): { observations: number; candidates: number; recorded: number };
   recordUsage(projectId: string, input: Omit<UsageLedgerEntry, "id" | "projectId" | "createdAt">): UsageLedgerEntry;
   metrics(projectId: string, taskId?: string): ContextOsMetrics;
+  recordLifecycleMetric(projectId: string, input: { provider: string; eventType: string; outcome: LifecycleMetricOutcome; latencyMs?: number }): void;
+  lifecycleMetrics(projectId: string): LifecycleMetrics;
   decideRotation(input: RotationContext): RotationDecision;
 }
 

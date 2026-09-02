@@ -88,3 +88,15 @@ export function finalizeSessionEvents(
   store.deleteExpiredRawEvents(projectId, new Date().toISOString());
   return { events: events.length, candidates, recorded };
 }
+
+export function acknowledgeSessionEvents(
+  store: FinalizationMemoryPort,
+  projectId: string,
+  sessionRefHash: string,
+): number {
+  const events = store.unprocessedRawEvents(projectId, sessionRefHash);
+  const processedAt = new Date().toISOString();
+  for (const event of events) store.markRawEventProcessed(projectId, event.id, processedAt);
+  store.deleteExpiredRawEvents(projectId, processedAt);
+  return events.length;
+}

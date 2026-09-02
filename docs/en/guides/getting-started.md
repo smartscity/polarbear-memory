@@ -36,7 +36,7 @@ Restart active Agent clients after installation. Use `polarbear-memory install -
 
 ## 3. Work normally
 
-Use the Agent as usual. MCP tools and lifecycle hooks retrieve bounded context, preserve reusable knowledge, and checkpoint substantive work. They are Agent-facing operations; users do not invoke them manually during normal work.
+Use the Agent as usual. Claude lifecycle hooks retrieve bounded prompt-specific Context, preserve explicitly labeled reusable knowledge at turn boundaries, and checkpoint compaction without model-selected routine Memory calls. Stock Codex uses MCP-assisted compatibility mode. Embedding clients may opt into the separately installed lifecycle-managed Codex App Server gateway. Users do not invoke Memory commands manually during normal work.
 
 After a safe checkpoint, close the current session and start a fresh one when the conversation becomes large. The new session resumes from durable task state and selected Memory rather than the complete old conversation.
 

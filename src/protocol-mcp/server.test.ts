@@ -7,6 +7,7 @@ import { afterEach, test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
 import { createMemoryMcpServer } from "./server.js";
+import { DEFAULT_MCP_TOOL_NAMES } from "./tool-permissions.js";
 import type { ProjectBinding } from "../platform/project.js";
 
 const temporaryDirectories: string[] = [];
@@ -53,10 +54,7 @@ test("default MCP surface preserves Memory tools and adds Context OS tools", asy
   try {
     assert.match(client.getInstructions() ?? "", /task_checkpoint/u);
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, [
-      "constraint_record", "context_explain", "context_get", "decision_record", "memory_context", "memory_feedback",
-      "memory_get", "memory_record", "memory_search", "memory_verify", "task_checkpoint", "task_create", "task_get",
-    ]);
+    assert.deepEqual(names, [...DEFAULT_MCP_TOOL_NAMES].sort());
     await assert.rejects(client.callTool({ name: "memory_status", arguments: {} }));
     const invalidBudget = await client.callTool({
       name: "memory_context",

@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { createConnection } from "node:net";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, test } from "node:test";
 import { discoverGitContext } from "../platform/git.js";
-import { planProject, writeProjectConfig } from "../platform/project.js";
+import { loadProject, planProject, writeProjectConfig } from "../platform/project.js";
 import { SqliteMemoryStore } from "../storage/sqlite-store.js";
+import { installCodexAppServerIntegration } from "../adapters/codex/app-server-integration.js";
+import { resolveAgentRuntime } from "../platform/agent-launch.js";
 import { ADMIN_API_VERSION, startAdminApi, type AdminServiceHandle } from "./server.js";
 
 const temporaryDirectories: string[] = [];
@@ -196,7 +198,7 @@ test("manages V2 records, task completion, feedback and resettable token savings
   assert.equal((reset.result as { resetCount: number }).resetCount, 1);
 });
 
-test("Admin API 1.5 manages durable tasks, checkpoints and explainable Context Packets", async () => {
+test("Admin API 1.6 manages durable tasks, checkpoints and explainable Context Packets", async () => {
   const fixture = repository();
   const handle = await startAdminApi(fixture.dataRoot);
   handles.push(handle);
@@ -226,6 +228,12 @@ test("Admin API 1.5 manages durable tasks, checkpoints and explainable Context P
     params: { projectRoot: fixture.root, packetId: packet.id },
   });
   assert.ok((explained.result as { budgetByCategory: object }).budgetByCategory);
+  const lifecycleMetrics = await request(handle, {
+    id: "context-os-5", apiVersion: ADMIN_API_VERSION, token, method: "usage.lifecycle",
+    params: { projectRoot: fixture.root },
+  });
+  assert.equal((lifecycleMetrics.result as { retrievalRuns: number }).retrievalRuns, 1);
+  assert.equal((lifecycleMetrics.result as { checkpointsCreated: number }).checkpointsCreated, 1);
 });
 
 test("exposes task-local checkpoint and run history without exposing storage", async () => {
@@ -405,6 +413,41 @@ test("exposes revision history, explainable maintenance, diagnostics and safe ba
   assert.equal(
     repairedCodex?.integrationMode,
     "MCP_ASSISTED",
+  );
+
+  const fakeCodexAppServer = join(fixture.root, "fake-codex-app-server.mjs");
+  writeFileSync(fakeCodexAppServer, `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\\n' '{"id":1,"result":{"userAgent":"fixture"}}' ;;
+    *'"method":"initialized"'*) exit 0 ;;
+  esac
+done
+`, { mode: 0o700 });
+  chmodSync(fakeCodexAppServer, 0o700);
+  installCodexAppServerIntegration(loadProject(discoverGitContext(fixture.root)), {
+    codexCommand: fakeCodexAppServer,
+    dryRun: false,
+    runtime: resolveAgentRuntime(),
+  });
+  const managedCodexResponse = await request(handle, {
+    id: "admin-integrations-3", apiVersion: ADMIN_API_VERSION, token, method: "agents.integrations",
+    params: { projectRoot: fixture.root },
+  });
+  const managedCodex = (managedCodexResponse.result as {
+    items: Array<{ id: string; integrationMode: string; lifecycle: string }>;
+  }).items.find(({ id }) => id === "codex");
+  const managedCodexState = managedCodex && {
+    id: managedCodex.id, integrationMode: managedCodex.integrationMode, lifecycle: managedCodex.lifecycle,
+  };
+  assert.ok(
+    JSON.stringify(managedCodexState) === JSON.stringify({
+      id: "codex", integrationMode: "LIFECYCLE_MANAGED", lifecycle: "CONFIGURED",
+    })
+    || JSON.stringify(managedCodexState) === JSON.stringify({
+      id: "codex", integrationMode: "MCP_ASSISTED", lifecycle: "UNSUPPORTED",
+    }),
+    "Codex must never claim managed lifecycle support unless the live App Server handshake succeeds.",
   );
 
   const preview = await request(handle, {

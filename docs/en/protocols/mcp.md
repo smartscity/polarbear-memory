@@ -27,6 +27,8 @@ It initializes the project when needed and configures every currently supported 
 - Claude Code: `.mcp.json`, Agent rules, and lifecycle hooks;
 - Codex: project-scoped `.codex/config.toml` and MCP server instructions.
 
+Claude Code requires permission for MCP tool calls independently of server installation. The installer adds exact project-level allow rules for the 13 default Polarbear MCP tools, including `decision_record`, so routine Context OS operations do not prompt in every session or worktree. It preserves unrelated permission rules and does not use a wildcard: optional Admin tools and any future tools require an explicit review before they can be auto-approved.
+
 Restart active Agent clients after installation. Existing unrelated configuration is preserved and managed changes are backed up. The Codex installer classifies a same-name entry as current managed, legacy managed, repairable Polarbear, or a foreign collision. Current entries are refreshed safely; legacy PATH-based entries from earlier releases and entries that clearly launch the installed Polarbear package are migrated automatically. Only an entry whose Polarbear ownership cannot be established is refused as an unmanaged collision. Re-running the installer is idempotent. Re-run it after moving or upgrading the active runtime. Use `polarbear-memory install --dry-run` for a non-mutating preview.
 
 Other MCP-compatible clients can configure the same stdio server manually:
@@ -69,14 +71,14 @@ When `--admin-tools` is explicitly enabled, the server also exposes `memory_stat
 
 ## Context workflow
 
-This workflow is performed by the Agent integration, not by the user during normal work:
+Claude lifecycle hooks perform routine retrieval, observation, turn distillation, and compaction checkpointing without model-selected MCP calls. MCP remains the explicit data/tool plane:
 
-1. Obtain a durable Task or create one with `task_create`.
-2. Call `context_get` with the Task ID and current request.
-3. Use Memory IDs for progressive expansion through `memory_get`.
-4. Record durable decisions and constraints explicitly.
-5. Persist structured state with `task_checkpoint` before handoff or rotation.
-6. Use `context_explain` to inspect selection and exclusions.
+1. use `memory_search` for deeper historical investigation;
+2. use Memory IDs for progressive expansion through `memory_get`;
+3. use `context_get` or `context_explain` when the automatically injected packet needs explicit inspection or expansion;
+4. use task and recording tools for intentional manual correction, compatibility mode, or providers without lifecycle control.
+
+Stock Codex uses this MCP-assisted compatibility mode. The separately installed Polarbear App Server gateway is lifecycle-managed only for embedding clients whose complete JSONL stream passes through it; it must not change the capability claim for ordinary Codex CLI/Desktop sessions.
 
 ## Compatibility changes
 

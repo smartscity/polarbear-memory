@@ -3,7 +3,8 @@ import type { AgentKind } from "./knowledge.js";
 export type AgentSource = "claude-code" | "codex" | "cursor" | "other";
 export type RawEventType =
   | "AGENT_SESSION_START" | "AGENT_USER_PROMPT" | "AGENT_PRE_TOOL" | "AGENT_POST_TOOL"
-  | "AGENT_PRE_COMPACT" | "AGENT_POST_COMPACT" | "AGENT_STOP" | "AGENT_SESSION_END"
+  | "AGENT_TOOL_FAILED" | "AGENT_TOOL_BATCH" | "AGENT_PRE_COMPACT" | "AGENT_POST_COMPACT"
+  | "AGENT_STOP" | "AGENT_TURN_FAILED" | "AGENT_SESSION_END"
   | "CLAUDE_STOP" | "CLAUDE_SESSION_END";
 
 export interface EventEnvelope {

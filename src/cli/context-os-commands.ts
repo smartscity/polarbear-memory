@@ -115,10 +115,17 @@ export function checkpointCommand(cwd: string, args: string[]): void {
 }
 
 export function metricsCommand(cwd: string, args: string[]): void {
-  const parsed = parseArgs({ args, options: { task: { type: "string" } }, strict: true });
+  const parsed = parseArgs({
+    args,
+    options: { task: { type: "string" }, lifecycle: { type: "boolean", default: false } },
+    strict: true,
+  });
+  if (parsed.values.lifecycle && parsed.values.task) throw new Error("metrics --lifecycle does not accept --task.");
   const { store, project } = open(cwd);
   try {
-    console.log(JSON.stringify(store.contextOs().metrics(project.id, parsed.values.task), null, 2));
+    console.log(JSON.stringify(parsed.values.lifecycle
+      ? store.contextOs().lifecycleMetrics(project.id)
+      : store.contextOs().metrics(project.id, parsed.values.task), null, 2));
   } finally {
     store.close();
   }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { compileContext } from "../application/context.js";
 import { runMaintenance } from "../application/maintenance.js";
 import { inspectBackup, listBackups, restoreBackup } from "../application/recovery.js";
@@ -15,14 +15,18 @@ import { TASK_PHASES, TASK_STATUSES, emptyCheckpointState, type CheckpointState,
 import { installClaudeIntegration, planClaudeIntegration } from "../adapters/claude-code/integration.js";
 import { installCodexIntegration, planCodexIntegration } from "../adapters/codex/integration.js";
 import {
-  buildPolarbearLaunchSpec, minimalAgentEnvironment, probeMcpLaunch, resolveAgentRuntime,
+  planCodexAppServerIntegration, readCodexAppServerLaunchSpec, readCodexAppServerProviderLaunchSpec,
+} from "../adapters/codex/app-server-integration.js";
+import {
+  buildPolarbearLaunchSpec, minimalAgentEnvironment, probeCodexAppServerLaunch, probeMcpLaunch, resolveAgentRuntime, validateAgentLaunchSpec,
 } from "../platform/agent-launch.js";
 
 export { ApiError } from "./admin-errors.js";
 
 const INTEGRATION_HANDSHAKE_TIMEOUT_MS = 5_000;
+const APP_SERVER_HANDSHAKE_TIMEOUT_MS = 10_000;
 
-export const ADMIN_API_VERSION = "1.5";
+export const ADMIN_API_VERSION = "1.6";
 export const ENGINE_VERSION = VERSION;
 export const ADMIN_CAPABILITIES = [
   "projects.status",
@@ -57,6 +61,7 @@ export const ADMIN_CAPABILITIES = [
   "agents.integrations_repair",
   "observations.distill",
   "usage.context_os",
+  "usage.lifecycle",
   "usage.token_savings",
   "usage.token_savings_reset",
   "projects.diagnostics",
@@ -456,12 +461,26 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
       else throw new ApiError("INVALID_ARGUMENT", "Unsupported agent integration.");
     }
     let codexPlan: ReturnType<typeof planCodexIntegration> | undefined;
+    let codexAppServerPlan: ReturnType<typeof planCodexAppServerIntegration> | undefined;
     let claudePlan: ReturnType<typeof planClaudeIntegration> | undefined;
     try { codexPlan = planCodexIntegration(project, runtime); } catch { codexPlan = undefined; }
+    try { codexAppServerPlan = planCodexAppServerIntegration(project); } catch { codexAppServerPlan = undefined; }
     try { claudePlan = planClaudeIntegration(project, runtime); } catch { claudePlan = undefined; }
     const configured = Boolean(codexPlan?.alreadyInstalled || claudePlan?.alreadyInstalled);
-    const probe = configured
-      ? await probeMcpLaunch(
+    let codexAppServerSpec: ReturnType<typeof readCodexAppServerLaunchSpec>;
+    let codexAppServerProviderSpec: ReturnType<typeof readCodexAppServerProviderLaunchSpec>;
+    try { codexAppServerSpec = readCodexAppServerLaunchSpec(project); } catch { codexAppServerSpec = undefined; }
+    try { codexAppServerProviderSpec = readCodexAppServerProviderLaunchSpec(project); } catch { codexAppServerProviderSpec = undefined; }
+    const codexAppServerLaunchable = Boolean(
+      codexAppServerPlan?.alreadyInstalled
+      && codexAppServerSpec
+      && validateAgentLaunchSpec(codexAppServerSpec).ok
+      && codexAppServerProviderSpec
+      && codexAppServerPlan.descriptor
+      && existsSync(codexAppServerPlan.descriptor.codexCommand),
+    );
+    const mcpProbe = configured
+      ? probeMcpLaunch(
           buildPolarbearLaunchSpec(runtime, ["mcp", "--stdio", "--project-root", project.root]),
           {
             cwd: project.root,
@@ -470,6 +489,12 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
           },
         )
       : null;
+    const appServerProbe = codexAppServerLaunchable && codexAppServerProviderSpec
+      ? probeCodexAppServerLaunch(codexAppServerProviderSpec, {
+          cwd: project.root, env: minimalAgentEnvironment(), timeoutMs: APP_SERVER_HANDSHAKE_TIMEOUT_MS,
+        })
+      : Promise.resolve(undefined);
+    const [probe, codexAppServerProbe] = await Promise.all([Promise.resolve(mcpProbe), appServerProbe]);
     const connectedDetails = {
       mcp: "CONFIGURED" as const,
       runtime: "READY" as const,
@@ -480,9 +505,19 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
       runtime: "READY" as const,
       handshake: "NOT_CHECKED" as const,
     };
+    const codexAppServerReady = codexAppServerProbe?.ok ?? false;
     const codex = (() => {
       try {
         if (!codexPlan) throw new Error("Codex configuration is unavailable.");
+        if (codexAppServerReady) {
+          return {
+            id: "codex", name: "Codex", status: "CONNECTED",
+            mcp: codexPlan.alreadyInstalled ? "CONFIGURED" as const : "NOT_CONFIGURED" as const,
+            runtime: "READY" as const,
+            handshake: codexPlan.alreadyInstalled ? (probe?.ok ? "OK" as const : "FAILED" as const) : "NOT_CHECKED" as const,
+            integrationMode: "LIFECYCLE_MANAGED", lifecycle: "CONFIGURED",
+          };
+        }
         return codexPlan.alreadyInstalled
           ? {
               id: "codex", name: "Codex", status: probe?.ok ? "CONNECTED" : "NEEDS_ATTENTION",
@@ -563,6 +598,9 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
     return withProject(params.projectRoot, (store, project) => store.contextOs().metrics(
       project.id, optionalText(params.taskId, "taskId", 128),
     ));
+  }
+  if (method === "usage.lifecycle") {
+    return withProject(params.projectRoot, (store, project) => store.contextOs().lifecycleMetrics(project.id));
   }
   if (method === "usage.token_savings") {
     return withProject(params.projectRoot, (store, project) => store.tokenSavings(project.id));

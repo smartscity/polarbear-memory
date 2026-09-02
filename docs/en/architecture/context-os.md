@@ -62,7 +62,9 @@ The provider-neutral `LifecycleOrchestrator` maps lifecycle events onto existing
 
 The baseline distiller extracts only explicitly labeled reusable decisions, pitfalls, task state, and next steps. It does not claim general semantic understanding of arbitrary tool output.
 
-Codex project integration remains MCP-assisted because stock Codex does not expose an equivalent project hook surface to Polarbear. Lifecycle-managed Codex requires a Polarbear-owned App Server client that can intercept `turn/start` and consume thread, turn, and item events; that adapter is not claimed by the current implementation. The Admin API reports `LIFECYCLE_MANAGED`, `MCP_ASSISTED`, or `UNAVAILABLE` explicitly.
+Stock Codex project integration remains MCP-assisted because it does not expose an equivalent project hook surface to Polarbear. The optional Polarbear Codex App Server gateway is a separate, explicitly installed managed path. It proxies the official bidirectional JSONL protocol, injects Context before `turn/start` and `turn/steer`, consumes thread/turn/item and compaction notifications, and forwards approvals and provider responses unchanged. Only clients launched through that descriptor are lifecycle-managed; ordinary Codex CLI/Desktop sessions remain MCP-assisted.
+
+Lifecycle telemetry is stored as bounded aggregate counters rather than an unbounded event log. It reports provider/event distribution, accepted and fail-open outcomes, spool replay, retrieval and hook latency, injected token estimates, observation processing, checkpoint reasons, and automatically persisted hook Memory.
 
 ## Managed runtimes and rotation
 
@@ -80,7 +82,7 @@ Resume failure records the failed run and falls back to a fresh session using th
 
 ## Persistence
 
-Schema v8 adds tasks, agent sessions, execution runs, observations, checkpoints, retrieval runs, context packets/items, and usage ledger records. The migration is additive, backed up, transactional, and foreign-key checked.
+Schema v9 includes tasks, agent sessions, execution runs, observations, checkpoints, retrieval runs, context packets/items, usage ledger records, and bounded lifecycle counters. The migration is additive, backed up, transactional, and foreign-key checked.
 
 ## Desktop UX contract
 

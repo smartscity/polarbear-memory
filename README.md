@@ -68,7 +68,7 @@ flowchart LR
     D -. selected context .-> A
 ```
 
-Claude Code uses project MCP configuration, Agent rules, and lifecycle hooks. Codex uses project-scoped MCP configuration and server instructions. MCP tool calls are performed by the Agent, not manually by the user.
+Claude Code uses lifecycle-managed automatic Context injection and turn distillation, plus MCP for explicit deeper retrieval. Stock Codex uses project-scoped MCP-assisted compatibility mode. An explicitly installed Polarbear Codex App Server gateway provides lifecycle-managed interception for embedding clients while preserving approvals and sandbox fields end to end.
 
 Read [How Context OS works](docs/en/architecture/context-os.md), [中文 Context OS 架构](docs/zh-CN/architecture/context-os.md), [MCP details](docs/en/protocols/mcp.md), or [中文 MCP 细节](docs/zh-CN/protocols/mcp.md).
 

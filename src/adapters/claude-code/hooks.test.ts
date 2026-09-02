@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,7 +8,7 @@ import { afterEach, test } from "node:test";
 import { discoverGitContext } from "../../platform/git.js";
 import { planProject, updateProjectPolicy, writeProjectConfig } from "../../platform/project.js";
 import { SqliteMemoryStore } from "../../storage/sqlite-store.js";
-import { ingestClaudeHook, replayProjectSpool } from "./hooks.js";
+import { CLAUDE_SPOOL_FILE_LIMIT, ingestClaudeHook, replayProjectSpool } from "./hooks.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -71,20 +71,11 @@ test("Stop plus SessionEnd creates a redacted, idempotent automatic handoff", ()
     const first = ingestClaudeHook(stopInput(root), root);
     const duplicate = ingestClaudeHook(stopInput(root), root);
     assert.equal(first.accepted, true);
+    assert.equal(first.finalized, 4);
     assert.equal(duplicate.accepted, false);
 
-    const rawStore = new SqliteMemoryStore(project.databasePath);
-    try {
-      const sessionHash = createHash("sha256").update("session-1").digest("hex");
-      const rawJson = JSON.stringify(rawStore.unprocessedRawEvents(project.id, sessionHash));
-      assert.doesNotMatch(rawJson, /super-secret-value|transcript-secret/u);
-      assert.match(rawJson, /<redacted>/u);
-    } finally {
-      rawStore.close();
-    }
-
     const ended = ingestClaudeHook(endInput(root), root);
-    assert.equal(ended.finalized, 4);
+    assert.equal(ended.finalized, 0);
 
     const store = new SqliteMemoryStore(project.databasePath);
     try {
@@ -144,11 +135,32 @@ test("database failure spools events and replay finalizes them later", () => {
   }
 });
 
-test("raw hook events expire after thirty days even when SessionEnd never arrives", () => {
+test("database failure stops growing the local spool at its hard limit", () => {
   const { root, project, restoreEnvironment } = fixture();
   try {
-    ingestClaudeHook(stopInput(root, "abandoned-session"), root, new Date("2026-01-01T00:00:00.000Z"));
-    ingestClaudeHook(stopInput(root, "current-session"), root, new Date("2026-02-01T00:00:00.000Z"));
+    const spool = join(project.dataDir, "spool");
+    mkdirSync(spool, { recursive: true });
+    for (let index = 0; index < CLAUDE_SPOOL_FILE_LIMIT; index += 1) {
+      writeFileSync(join(spool, `${index.toString(16).padStart(64, "0")}.json`), "{}\n");
+    }
+    mkdirSync(project.databasePath);
+    const result = ingestClaudeHook(stopInput(root, "spool-limit-session"), root);
+    assert.equal(result.accepted, false);
+    assert.equal(result.spooled, false);
+    assert.equal(readdirSync(spool).filter((name) => name.endsWith(".json")).length, CLAUDE_SPOOL_FILE_LIMIT);
+  } finally {
+    restoreEnvironment();
+  }
+});
+
+test("raw non-boundary hook events expire after thirty days even when SessionEnd never arrives", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  try {
+    const prompt = (session: string) => ({
+      session_id: session, cwd: root, hook_event_name: "UserPromptSubmit", prompt: "Continue the current work.",
+    });
+    ingestClaudeHook(prompt("abandoned-session"), root, new Date("2026-01-01T00:00:00.000Z"));
+    ingestClaudeHook(prompt("current-session"), root, new Date("2026-02-01T00:00:00.000Z"));
     const store = new SqliteMemoryStore(project.databasePath);
     try {
       const hash = (session: string) => createHash("sha256").update(session).digest("hex");
@@ -186,9 +198,12 @@ test("zero-day retention keeps Stop until SessionEnd finalization and then remov
   const { root, project, restoreEnvironment } = fixture();
   try {
     updateProjectPolicy(project.configPath, { captureMode: "summary", rawEventRetentionDays: 0 });
-    ingestClaudeHook({ ...stopInput(root, "ephemeral"), last_assistant_message: "Decision: Finalize before zero-day cleanup." }, root, new Date("2026-01-01T00:00:00.000Z"));
+    const stopped = ingestClaudeHook({
+      ...stopInput(root, "ephemeral"), last_assistant_message: "Decision: Finalize before zero-day cleanup.",
+    }, root, new Date("2026-01-01T00:00:00.000Z"));
+    assert.equal(stopped.finalized, 1);
     const ended = ingestClaudeHook(endInput(root, "ephemeral"), root, new Date("2026-01-01T00:01:00.000Z"));
-    assert.equal(ended.finalized, 1);
+    assert.equal(ended.finalized, 0);
     const store = new SqliteMemoryStore(project.databasePath);
     try {
       const hash = createHash("sha256").update("ephemeral").digest("hex");
@@ -196,6 +211,40 @@ test("zero-day retention keeps Stop until SessionEnd finalization and then remov
       assert.equal(store.search(project.id, "zero-day cleanup", 10).length, 1);
     } finally {
       store.close();
+    }
+  } finally {
+    restoreEnvironment();
+  }
+});
+
+test("UserPromptSubmit retrieves prompt-specific context without persisting the raw prompt", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  try {
+    const store = new SqliteMemoryStore(project.databasePath);
+    store.initializeProject(project);
+    const task = store.contextOs().createTask(project.id, {
+      title: "Runtime discovery", objective: "Continue Desktop runtime discovery.", phase: "IMPLEMENTATION",
+    });
+    store.record(project.id, {
+      type: "DECISION", summary: "Runtime discovery uses launch.json", scopeKind: "TASK", scopeRef: task.id,
+    });
+    store.close();
+
+    const rawPrompt = "Continue Desktop runtime discovery with private-marker-92741.";
+    const submitted = ingestClaudeHook({
+      session_id: "prompt-session", cwd: root, hook_event_name: "UserPromptSubmit", prompt: rawPrompt,
+    }, root);
+    assert.match(submitted.additionalContext ?? "", /Runtime discovery uses launch\.json/u);
+    assert.match(submitted.additionalContext ?? "", /UNTRUSTED|untrusted/u);
+
+    const verified = new SqliteMemoryStore(project.databasePath);
+    try {
+      const sessionHash = createHash("sha256").update("prompt-session").digest("hex");
+      const persisted = JSON.stringify(verified.unprocessedRawEvents(project.id, sessionHash));
+      assert.doesNotMatch(persisted, /private-marker-92741/u);
+      assert.match(persisted, /promptDigest/u);
+    } finally {
+      verified.close();
     }
   } finally {
     restoreEnvironment();
@@ -230,7 +279,7 @@ test("SessionStart loads durable task context and PreCompact persists a checkpoi
     try {
       const checkpoint = verified.contextOs().latestCheckpoint(project.id, task.id);
       assert.ok(checkpoint);
-      assert.match(checkpoint.summary, /compaction boundary/u);
+      assert.match(checkpoint.summary, /compaction boundary/iu);
       assert.deepEqual(checkpoint.state.remaining, [task.objective]);
     } finally {
       verified.close();

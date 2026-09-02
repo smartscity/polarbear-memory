@@ -27,6 +27,8 @@ polarbear-memory install
 - Claude Code：`.mcp.json`、Agent rules 和 lifecycle hooks；
 - Codex：项目级 `.codex/config.toml` 和 MCP server instructions。
 
+Claude Code 对 MCP tool call 的授权独立于 server 安装。安装器会为 13 个默认 Polarbear MCP tools 添加精确的项目级 allow rules，其中包括 `decision_record`，因此日常 Context OS 操作不会在每个 session 或 worktree 中反复询问。安装器保留无关 permission rules，并且不使用通配符；可选 Admin tools 和未来新增 tools 必须经过显式评审后才能自动授权。
+
 安装后重启正在运行的 Agent 客户端。安装器会保留无关配置并备份托管修改。Codex 安装器把同名条目分为当前托管、旧版托管、可修复 Polarbear 配置或外部冲突：当前配置会被安全刷新；早期版本生成的 PATH 依赖配置，以及可以明确判断为启动当前已安装 Polarbear 包的配置，会被自动迁移；只有无法确认 Polarbear 所有权的条目才会作为未托管冲突拒绝覆盖。重复运行安装器是幂等的。移动或升级当前 runtime 后，应重新运行安装器。使用 `polarbear-memory install --dry-run` 可以进行无修改预览。
 
 其他兼容 MCP 的客户端可手动配置同一个 stdio server：
@@ -69,11 +71,11 @@ Runtime 与 CLI 路径必须属于同一个可工作的 Polarbear 安装。受�
 
 ## Context 工作流
 
-以下工作流由 Agent 集成执行，不是用户日常需要手动完成的操作：
+Claude lifecycle hooks 无需模型选择 MCP tool，就能完成日常检索、观察、turn distillation 与 compaction checkpoint。MCP 继续承担显式 data/tool plane：
 
-1. 获取 durable Task，或通过 `task_create` 创建。
-2. 使用 Task ID 和当前请求调用 `context_get`。
-3. 通过 `memory_get` 渐进展开 Memory。
-4. 显式记录 durable decision 与 constraint。
-5. Handoff 或 rotation 前使用 `task_checkpoint`。
-6. 使用 `context_explain` 检查选择与排除原因。
+1. 使用 `memory_search` 深入调查历史信息；
+2. 使用 Memory ID 通过 `memory_get` 渐进展开；
+3. 自动注入的 Packet 需要显式检查或扩展时，使用 `context_get` 或 `context_explain`；
+4. 只有在有意进行人工修正、兼容模式或 provider 缺少 lifecycle 控制时，才使用 Task 与记录工具。
+
+Stock Codex 使用 MCP-assisted 兼容模式。独立安装的 Polarbear App Server gateway 只有在 embedding client 的完整 JSONL stream 都经过它时才是 lifecycle-managed；它不能改变普通 Codex CLI/Desktop session 的 capability claim。

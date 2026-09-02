@@ -105,6 +105,15 @@ export type ContextOsMetrics = {
   contextReductionFactor: number; memoryHitRate: number; contextWasteRatio: number;
   sessionCarryCostProxy: number; contextCostPerSuccessfulTask: number; averageAssemblyLatencyMs: number;
 };
+export type LifecycleMetrics = {
+  eventsAccepted: number; eventsSpooled: number; eventsReplayed: number; failOpenOutcomes: number;
+  eventsByProvider: Record<string, number>; eventsByType: Record<string, number>;
+  observationsPending: number; observationsProcessed: number; retrievalRuns: number;
+  contextPacketsInjected: number; injectedEstimatedTokens: number;
+  averageRetrievalLatencyMs: number; p95RetrievalLatencyMs: number;
+  averageHookLatencyMs: number; maxHookLatencyMs: number;
+  checkpointsCreated: number; compactionCheckpointsCreated: number; hookMemoriesPersisted: number;
+};
 export type HelloResponse = { apiVersion: string; engineVersion: string; capabilities: MemoryCapability[]; transport: "local-user-socket" };
 export type ProjectStatusResponse = { project: { id: string; name: string }; counts: Record<string, number>; recent: MemoryRecord[] };
 export type MemoryListResponse = { items: MemoryRecord[]; offset: number; limit: number; nextOffset: number | null };

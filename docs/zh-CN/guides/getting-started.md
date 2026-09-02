@@ -36,7 +36,7 @@ polarbear-memory install
 
 ## 3. 正常工作
 
-像平时一样使用 Agent。MCP 工具和 lifecycle hooks 会取得有限上下文、保存可复用知识，并为实质性工作创建 checkpoint。这些是 Agent-facing 操作，正常使用时不需要用户手动调用。
+像平时一样使用 Agent。Claude lifecycle hooks 会检索 prompt-specific 有界 Context、在 turn 边界保存明确标记的可复用知识，并在 compaction 时创建 checkpoint，不依赖模型选择日常 Memory tool。Stock Codex 使用 MCP-assisted 兼容模式；embedding client 可以选择独立安装的 lifecycle-managed Codex App Server gateway。正常使用时，用户不需要手动调用 Memory 命令。
 
 保存安全 checkpoint 后，可以在对话变大时关闭当前 session。新 session 从持久任务状态和筛选后的 Memory 继续，不需要携带完整旧对话。
 

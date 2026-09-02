@@ -137,6 +137,29 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     const searched = run(process.execPath, offline(["search", "settlement retry"]), repository, dataDir);
     assert.match(searched.stdout, /Do not retry settlement/);
 
+    run(process.execPath, offline([
+      "task", "create", "--title", "Settlement recovery", "--objective", "Continue settlement recovery safely.",
+      "--phase", "IMPLEMENTATION",
+    ]), repository, dataDir);
+    const promptHook = run(
+      process.execPath,
+      offline(["hook", "ingest", "--event", "UserPromptSubmit"]),
+      repository,
+      dataDir,
+      JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "cli-prompt-session",
+        cwd: repository,
+        prompt: "Continue settlement retry recovery.",
+      }),
+    );
+    const hookOutput = JSON.parse(promptHook.stdout) as {
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    assert.equal(hookOutput.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /Do not retry settlement/u);
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /untrusted historical data/u);
+
     const context = run(process.execPath, offline(["context", "--task", "settlement retry", "--budget", "400"]), repository, dataDir);
     assert.match(context.stdout, /Polarbear Memory Context/);
     assert.match(context.stdout, /Do not retry settlement/);
@@ -183,6 +206,12 @@ test("CLI completes Memory, lifecycle, hook and real MCP stdio flows", async () 
     assert.match(doctor.stdout, /Claude MCP handshake\s+OK/u);
     assert.match(doctor.stdout, /Codex MCP\s+config\s+OK/u);
     assert.match(doctor.stdout, /Codex MCP\s+handshake\s+OK/u);
+    assert.match(doctor.stdout, /Claude lifecycle\s+LIFECYCLE_MANAGED/u);
+    assert.match(doctor.stdout, /Claude lifecycle events\s+OK/u);
+    assert.match(doctor.stdout, /Claude prompt injection\s+OK/u);
+    assert.match(doctor.stdout, /Claude event spool\s+OK/u);
+    assert.match(doctor.stdout, /Codex lifecycle mode\s+MCP_ASSISTED/u);
+    assert.match(doctor.stdout, /Codex App Server adapter\s+NOT_INSTALLED/u);
 
     writeFileSync(codexConfigPath, upgradedCodexConfig.replace(
       `command = ${JSON.stringify(process.execPath)}`,

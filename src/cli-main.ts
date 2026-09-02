@@ -8,6 +8,7 @@ import { runMaintenance } from "./application/maintenance.js";
 import { runBenchmark } from "./application/benchmark.js";
 import { planClaudeIntegration, uninstallClaudeIntegration } from "./adapters/claude-code/integration.js";
 import { uninstallCodexIntegration } from "./adapters/codex/integration.js";
+import { uninstallCodexAppServerIntegration } from "./adapters/codex/app-server-integration.js";
 import { runClaudeCommand, runHookCommand, runSpoolCommand } from "./cli/claude-commands.js";
 import { runInstallCommand } from "./cli/install-command.js";
 import { runCodexCommand } from "./cli/codex-commands.js";
@@ -41,7 +42,7 @@ Usage:
   polarbear-memory context build --request TEXT [--task TASK_ID] [--budget N] [--provider NAME]
   polarbear-memory context explain PACKET_ID
   polarbear-memory checkpoint --task TASK_ID --summary TEXT [--state FILE.json]
-  polarbear-memory metrics [--task TASK_ID]
+  polarbear-memory metrics [--task TASK_ID|--lifecycle]
   polarbear-memory run --provider codex|claude-code --task TASK_ID [--model MODEL] [--resume SESSION_ID|--fresh] [--writable] "REQUEST"
   polarbear-memory verify MEMORY_ID --result STATE --reason TEXT
   polarbear-memory forget MEMORY_ID --reason TEXT
@@ -58,7 +59,9 @@ Usage:
   polarbear-memory claude install [--dry-run] [--command DEPRECATED]
   polarbear-memory claude restore
   polarbear-memory codex install [--dry-run]
-  polarbear-memory hook ingest --event SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SessionEnd
+  polarbear-memory codex app-server install --codex-command ABSOLUTE_PATH [--dry-run]
+  polarbear-memory codex app-server run [--codex-command PATH] [--project-root PATH] [--task TASK_ID]
+  polarbear-memory hook ingest --event SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolUseFailure|PostToolBatch|PreCompact|PostCompact|Stop|StopFailure|SessionEnd
   polarbear-memory spool replay
   polarbear-memory rebuild-index
   polarbear-memory backup [create|list|verify FILE|restore FILE --confirm FILE]
@@ -184,13 +187,17 @@ function uninstall(cwd: string, args: string[]): void {
   const project = loadProject(discoverGitContext(cwd));
   const result = uninstallClaudeIntegration(project, { dryRun: parsed.values["dry-run"] });
   const codex = uninstallCodexIntegration(project, { dryRun: parsed.values["dry-run"] });
+  const codexAppServer = uninstallCodexAppServerIntegration(project, { dryRun: parsed.values["dry-run"] });
   console.log(`Claude MCP entry: ${result.plan.mcpEntry ? "remove" : "unchanged"}`);
   console.log(`Claude hooks: ${result.plan.hooks} managed entries to remove`);
+  console.log(`Claude MCP permissions: ${result.plan.permissions} managed entries to remove`);
   console.log(`Claude rule: ${result.plan.managedRule ? "remove" : result.plan.modifiedRulePreserved ? "preserve modified file" : "unchanged"}`);
   console.log(`Codex MCP entry: ${codex.plan.managedEntry ? "remove" : "unchanged"}`);
+  console.log(`Codex App Server descriptor: ${codexAppServer.managedDescriptor ? "remove" : "unchanged"}`);
   if (parsed.values["dry-run"]) return console.log("Dry run only; no files were changed.");
   if (result.backupDir) console.log(`Integration backup: ${result.backupDir}`);
   if (codex.backupDir) console.log(`Codex integration backup: ${codex.backupDir}`);
+  if (codexAppServer.backupDir) console.log(`Codex App Server backup: ${codexAppServer.backupDir}`);
   if (!parsed.values["delete-data"]) return console.log(`Project data preserved at ${project.dataDir}`);
   if (parsed.values.confirm !== project.id) {
     console.log(`Data deletion was not performed. Re-run with --delete-data --confirm ${project.id}`);

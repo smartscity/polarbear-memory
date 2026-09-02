@@ -136,3 +136,60 @@ test("Context Planner preserves mandatory P0 categories under hard budget pressu
     store.close();
   }
 });
+
+test("lifecycle metrics aggregate bounded counters, retrieval latency, distillation, and checkpoints", () => {
+  const store = fixture();
+  try {
+    const task = store.contextOs().createTask(PROJECT_ID, {
+      title: "Lifecycle telemetry", objective: "Measure lifecycle behavior.", phase: "VERIFICATION",
+    });
+    store.contextOs().recordObservation(PROJECT_ID, {
+      taskId: task.id,
+      provider: "codex-app-server",
+      eventType: "TURN_COMPLETED",
+      payload: { lastAssistantMessage: "Decision: Keep lifecycle counters local." },
+      artifactRefs: [], estimatedTokens: 10, importance: 800,
+      occurredAt: "2026-09-02T00:00:00.000Z", sourceFingerprint: "lifecycle-observation-1",
+    });
+    store.contextOs().recordLifecycleMetric(PROJECT_ID, {
+      provider: "codex-app-server", eventType: "TURN_COMPLETED", outcome: "ACCEPTED", latencyMs: 12,
+    });
+    store.contextOs().recordLifecycleMetric(PROJECT_ID, {
+      provider: "claude-code", eventType: "TURN_COMPLETED", outcome: "SPOOLED",
+    });
+    store.contextOs().recordLifecycleMetric(PROJECT_ID, {
+      provider: "claude-code", eventType: "TURN_COMPLETED", outcome: "REPLAYED", latencyMs: 4,
+    });
+    store.contextOs().buildContext(PROJECT_ID, {
+      taskId: task.id, currentRequest: "Inspect lifecycle telemetry.", provider: "codex-app-server", maxTokens: 600,
+    });
+    store.contextOs().checkpoint(PROJECT_ID, {
+      taskId: task.id, status: "VERIFYING", phase: "VERIFICATION",
+      summary: "Compaction boundary checkpoint with known telemetry state.",
+      state: {
+        changed: [], learned: [], decisionsAdded: [], constraintsAdded: [], failedAttempts: [], filesChanged: [],
+        verification: [], unresolved: [], remaining: ["Verify telemetry."],
+      },
+    });
+    assert.deepEqual(store.contextOs().distill(PROJECT_ID), { observations: 1, candidates: 1, recorded: 1 });
+
+    const metrics = store.contextOs().lifecycleMetrics(PROJECT_ID);
+    assert.equal(metrics.eventsAccepted, 1);
+    assert.equal(metrics.eventsSpooled, 1);
+    assert.equal(metrics.eventsReplayed, 1);
+    assert.equal(metrics.eventsByProvider["codex-app-server"], 1);
+    assert.equal(metrics.eventsByType.TURN_COMPLETED, 1);
+    assert.equal(metrics.observationsPending, 0);
+    assert.equal(metrics.observationsProcessed, 1);
+    assert.equal(metrics.retrievalRuns, 1);
+    assert.equal(metrics.contextPacketsInjected, 1);
+    assert.ok(metrics.injectedEstimatedTokens > 0);
+    assert.equal(metrics.averageHookLatencyMs, 12);
+    assert.equal(metrics.maxHookLatencyMs, 12);
+    assert.equal(metrics.checkpointsCreated, 1);
+    assert.equal(metrics.compactionCheckpointsCreated, 1);
+    assert.equal(metrics.hookMemoriesPersisted, 1);
+  } finally {
+    store.close();
+  }
+});

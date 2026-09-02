@@ -15,9 +15,11 @@ export class ObservationDistiller {
     this.#record = record;
   }
 
-  distill(projectId: string, limit = 200): { observations: number; candidates: number; recorded: number } {
+  distill(projectId: string, limit = 200, sessionRefHash?: string): {
+    observations: number; candidates: number; recorded: number;
+  } {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Distillation limit must be between 1 and 1000.");
-    const observations = this.#telemetry.pendingObservations(projectId, limit);
+    const observations = this.#telemetry.pendingObservations(projectId, limit, sessionRefHash);
     let candidates = 0;
     let recorded = 0;
     for (const observation of observations) {

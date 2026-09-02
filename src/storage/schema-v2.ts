@@ -1,6 +1,6 @@
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 export const V2_MIGRATION_CHECKSUM = "v2-fact-episode-entity-2026-08-28";
-export const CONTEXT_OS_MIGRATION_CHECKSUM = "v8-agent-context-os-2026-08-29";
+export const CONTEXT_OS_MIGRATION_CHECKSUM = "v9-lifecycle-telemetry-2026-09-02";
 
 export const V2_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -381,6 +381,20 @@ CREATE TABLE IF NOT EXISTS observations (
 
 CREATE INDEX IF NOT EXISTS observations_pending ON observations(project_id, persisted_as_memory, importance_milli DESC, occurred_at);
 CREATE INDEX IF NOT EXISTS observations_task ON observations(task_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS lifecycle_counters (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('ACCEPTED','REJECTED','SPOOLED','REPLAYED','FAIL_OPEN')),
+  event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0),
+  total_latency_ms INTEGER NOT NULL DEFAULT 0 CHECK (total_latency_ms >= 0),
+  max_latency_ms INTEGER NOT NULL DEFAULT 0 CHECK (max_latency_ms >= 0),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, provider, event_type, outcome)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS lifecycle_counters_project ON lifecycle_counters(project_id, provider, event_type);
 
 CREATE TABLE IF NOT EXISTS checkpoints (
   id TEXT PRIMARY KEY,
