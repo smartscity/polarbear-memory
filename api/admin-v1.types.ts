@@ -100,7 +100,10 @@ export type ContextReceipt = {
   sourceCounts: Record<"TASK" | "CHECKPOINT" | "MEMORY", number>; estimatedTokens: number; builtAt: string;
   deliveredAt?: string; failureCode?: string; failureReason?: string;
 };
-export type CurrentContextResponse = { packet: ContextPacket | null };
+export type CurrentContextResponse = {
+  packet: ContextPacket | null; receipt: ContextReceipt | null; task: TaskRecord | null;
+  latestCheckpoint: TaskCheckpoint | null; safeToReplaceSession: boolean;
+};
 export type ContextExplanation = {
   packet: ContextPacket; receipt: ContextReceipt; budgetByCategory: Record<string, { used: number; limit: number }>;
   excluded: Array<{ sourceId: string; category: ContextCategory; reason: string; estimatedTokens: number }>;

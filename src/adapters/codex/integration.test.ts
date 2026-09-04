@@ -39,6 +39,7 @@ test("Codex integration dry-run is non-mutating and install preserves other conf
   mkdirSync(directory, { recursive: true });
   const original = `model = "gpt-test"\n\n[mcp_servers.existing]\ncommand = "existing"\n`;
   writeFileSync(configPath, original);
+  writeFileSync(join(project.root, "AGENTS.md"), "# Existing project instructions\n");
   try {
     installCodexIntegration(project, { dryRun: true });
     assert.equal(readFileSync(configPath, "utf8"), original);
@@ -49,12 +50,18 @@ test("Codex integration dry-run is non-mutating and install preserves other conf
     assert.match(config, /model = "gpt-test"/u);
     assert.match(config, /\[mcp_servers\.existing\]/u);
     assert.match(config, /\[mcp_servers\.polarbear-memory\]/u);
+    const rule = readFileSync(join(project.root, "AGENTS.md"), "utf8");
+    assert.match(rule, /# Existing project instructions/u);
+    assert.match(rule, /BEGIN POLARBEAR MEMORY MANAGED CONTEXT/u);
+    assert.match(rule, /MCP-assisted/u);
+    assert.match(rule, /task_checkpoint/u);
     assert.equal(readCodexLaunchSpec(project)?.args.at(-1), project.root);
     const current = planCodexIntegration(project);
     assert.equal(current.classification, "CURRENT_MANAGED");
     assert.equal(current.alreadyInstalled, true);
     installCodexIntegration(project, { dryRun: false });
     assert.equal(readFileSync(configPath, "utf8"), config);
+    assert.equal(readFileSync(join(project.root, "AGENTS.md"), "utf8"), rule);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
@@ -125,6 +132,22 @@ test("Codex integration normalizes a repairable installed-package launch", () =>
   }
 });
 
+test("Codex install repairs a missing managed AGENTS rule without changing the current MCP launch", () => {
+  const { temporary, project } = fixture();
+  try {
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    const configPath = join(project.root, ".codex", "config.toml");
+    const config = readFileSync(configPath, "utf8");
+    rmSync(join(project.root, "AGENTS.md"));
+    assert.equal(planCodexIntegration(project, arbitraryRuntime).alreadyInstalled, false);
+    installCodexIntegration(project, { dryRun: false, runtime: arbitraryRuntime });
+    assert.equal(readFileSync(configPath, "utf8"), config);
+    assert.match(readFileSync(join(project.root, "AGENTS.md"), "utf8"), /task_checkpoint/u);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
 test("Codex uninstall removes only the managed block", () => {
   const { temporary, project } = fixture();
   try {
@@ -132,11 +155,15 @@ test("Codex uninstall removes only the managed block", () => {
     const configPath = join(project.root, ".codex", "config.toml");
     const installed = readFileSync(configPath, "utf8");
     writeFileSync(configPath, `model = "keep"\n\n${installed}`);
+    const rulePath = join(project.root, "AGENTS.md");
+    const managedRule = readFileSync(rulePath, "utf8");
+    writeFileSync(rulePath, `# Keep this instruction\n\n${managedRule}`);
     assert.equal(uninstallCodexIntegration(project, { dryRun: true }).plan.managedEntry, true);
     assert.match(readFileSync(configPath, "utf8"), /polarbear-memory/u);
     const result = uninstallCodexIntegration(project, { dryRun: false });
     assert.ok(result.backupDir);
     assert.equal(readFileSync(configPath, "utf8"), `model = "keep"\n`);
+    assert.equal(readFileSync(rulePath, "utf8"), "# Keep this instruction\n");
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

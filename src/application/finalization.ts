@@ -5,6 +5,7 @@ import { captureFileAnchors } from "../platform/anchors.js";
 
 const LABELS: Array<{ type: MemoryType; pattern: RegExp }> = [
   { type: "DECISION", pattern: /^(?:decision|决策|决定)\s*[:：-]\s*(.+)$/iu },
+  { type: "CONSTRAINT", pattern: /^(?:constraint|hard constraint|约束|硬性约束)\s*[:：-]\s*(.+)$/iu },
   { type: "PITFALL", pattern: /^(?:pitfall|failure|failed approach|失败经验|踩坑|注意)\s*[:：-]\s*(.+)$/iu },
   { type: "TASK_STATE", pattern: /^(?:task state|current state|progress|进度|当前状态)\s*[:：-]\s*(.+)$/iu },
   { type: "TODO", pattern: /^(?:todo|next step|next|下一步|待办)\s*[:：-]\s*(.+)$/iu },

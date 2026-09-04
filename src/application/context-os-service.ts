@@ -11,6 +11,8 @@ import { ContextPlanner } from "./context-planner.js";
 import { RotationPolicy } from "../runtime/rotation-policy.js";
 import { ObservationDistiller } from "./observation-distiller.js";
 import type { Memory, RecordMemoryInput } from "../domain/memory.js";
+import { TaskAffinityResolver } from "./task-affinity-resolver.js";
+import { CheckpointBuilder } from "./checkpoint-builder.js";
 
 export class ContextOsService implements ContextOsPort {
   readonly #tasks: TaskCheckpointRepository;
@@ -20,6 +22,8 @@ export class ContextOsService implements ContextOsPort {
   readonly #planner: ContextPlanner;
   readonly #rotation: RotationPolicy;
   readonly #distiller: ObservationDistiller;
+  readonly #taskAffinity: TaskAffinityResolver;
+  readonly #checkpointBuilder: CheckpointBuilder;
 
   constructor(
     tasks: TaskCheckpointRepository,
@@ -40,10 +44,16 @@ export class ContextOsService implements ContextOsPort {
     this.#planner = new ContextPlanner(tasks, packets, recall);
     this.#rotation = rotation;
     this.#distiller = new ObservationDistiller(telemetry, record);
+    this.#taskAffinity = new TaskAffinityResolver(tasks, telemetry);
+    this.#checkpointBuilder = new CheckpointBuilder(tasks, telemetry);
   }
 
   createTask(projectId: string, input: Parameters<ContextOsPort["createTask"]>[1]): Task {
     return this.#tasks.createTask(projectId, input);
+  }
+
+  resolveTaskAffinity(projectId: string, input: Parameters<ContextOsPort["resolveTaskAffinity"]>[1]) {
+    return this.#taskAffinity.resolve(projectId, input);
   }
 
   getTask(projectId: string, taskId: string): Task | undefined {
@@ -64,6 +74,10 @@ export class ContextOsService implements ContextOsPort {
 
   checkpoint(projectId: string, input: Parameters<ContextOsPort["checkpoint"]>[1]) {
     return this.#tasks.checkpoint(projectId, input);
+  }
+
+  checkpointLifecycle(projectId: string, input: Parameters<ContextOsPort["checkpointLifecycle"]>[1]) {
+    return this.#checkpointBuilder.build(projectId, input);
   }
 
   listTaskRuns(projectId: string, taskId: string, limit?: number) {

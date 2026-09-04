@@ -1,23 +1,19 @@
 import type { AgentLifecycleEvent, AgentLifecycleOutcome } from "../domain/agent-lifecycle.js";
-import { emptyCheckpointState, type CheckpointState, type ContextOsPort, type Task } from "../domain/context-os.js";
+import type { ContextOsPort, Task } from "../domain/context-os.js";
 
-const CONTINUABLE_TASK_STATUSES = new Set(["ACTIVE", "VERIFYING", "BLOCKED", "PLANNED"]);
 const CONTEXT_EVENTS = new Set(["SESSION_STARTED", "USER_PROMPT_SUBMITTED"]);
 const TURN_BOUNDARIES = new Set(["TURN_COMPLETED", "TURN_FAILED", "SESSION_ENDED"]);
 
-function continuationState(task: Task, previous?: CheckpointState): CheckpointState {
-  const state = previous ?? emptyCheckpointState();
-  return {
-    changed: [...state.changed],
-    learned: [...state.learned],
-    decisionsAdded: [...state.decisionsAdded],
-    constraintsAdded: [...state.constraintsAdded],
-    failedAttempts: state.failedAttempts.map((item) => ({ ...item })),
-    filesChanged: [...state.filesChanged],
-    verification: state.verification.map((item) => ({ ...item })),
-    unresolved: [...state.unresolved],
-    remaining: state.remaining.length > 0 ? [...state.remaining] : [task.objective],
-  };
+function artifactRefs(payload: Record<string, string | boolean>): string[] {
+  if (typeof payload.artifactRefs !== "string") return [];
+  try {
+    const parsed = JSON.parse(payload.artifactRefs) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((item): item is string => typeof item === "string"
+      && item.length > 0 && item.length <= 1_024 && !item.startsWith("/") && !item.split("/").includes("..")))].slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 export class LifecycleOrchestrator {
@@ -42,22 +38,36 @@ export class LifecycleOrchestrator {
   }
 
   #handle(event: AgentLifecycleEvent): AgentLifecycleOutcome {
-    const task = this.#resolveTask(event.preferredTaskId);
+    const resolution = this.#contextOs.resolveTaskAffinity(this.#projectId, {
+      ...(event.preferredTaskId ? { preferredTaskId: event.preferredTaskId } : {}),
+      sessionRefHash: event.sessionRefHash,
+      ...(event.currentRequest ? { currentRequest: event.currentRequest } : {}),
+      createIfMissing: event.type === "USER_PROMPT_SUBMITTED",
+    });
+    const resolvedTask = resolution.task;
     this.#contextOs.recordObservation(this.#projectId, {
-      ...(task ? { taskId: task.id } : {}),
+      ...(resolvedTask ? { taskId: resolvedTask.id } : {}),
       provider: event.provider,
       eventType: event.type,
       payload: { ...event.payload, sessionRefHash: event.sessionRefHash },
-      artifactRefs: [],
+      artifactRefs: artifactRefs(event.payload),
       estimatedTokens: Math.ceil(Buffer.byteLength(JSON.stringify(event.payload), "utf8") / 4),
       importance: this.#importance(event.type),
       occurredAt: event.occurredAt,
       sourceFingerprint: event.id,
     });
 
-    const checkpoint = task && event.type === "BEFORE_COMPACTION"
-      ? this.#checkpoint(task, event.id)
+    const checkpoint = resolvedTask && (event.type === "BEFORE_COMPACTION" || TURN_BOUNDARIES.has(event.type))
+      ? this.#contextOs.checkpointLifecycle(this.#projectId, {
+          taskId: resolvedTask.id,
+          sessionRefHash: event.sessionRefHash,
+          boundary: event.type as "TURN_COMPLETED" | "TURN_FAILED" | "BEFORE_COMPACTION" | "SESSION_ENDED",
+          idempotencyKey: event.id,
+        })
       : undefined;
+    const task = checkpoint
+      ? this.#contextOs.getTask(this.#projectId, checkpoint.taskId) ?? resolvedTask
+      : resolvedTask;
     const distilled = TURN_BOUNDARIES.has(event.type)
       ? this.#contextOs.distill(this.#projectId, 200, event.sessionRefHash)
       : { observations: 0, candidates: 0, recorded: 0 };
@@ -94,15 +104,6 @@ export class LifecycleOrchestrator {
     return this.#contextOs.recordContextDelivery(this.#projectId, packetId, input);
   }
 
-  #resolveTask(preferredTaskId?: string): Task | undefined {
-    if (preferredTaskId) {
-      const preferred = this.#contextOs.getTask(this.#projectId, preferredTaskId);
-      if (preferred && CONTINUABLE_TASK_STATUSES.has(preferred.status)) return preferred;
-    }
-    return this.#contextOs.listTasks(this.#projectId)
-      .find((task) => CONTINUABLE_TASK_STATUSES.has(task.status));
-  }
-
   #context(task: Task | undefined, event: AgentLifecycleEvent) {
     const currentRequest = event.type === "USER_PROMPT_SUBMITTED"
       ? event.currentRequest?.trim()
@@ -113,20 +114,6 @@ export class LifecycleOrchestrator {
       currentRequest,
       provider: event.provider,
       ...(event.contextBudget === undefined ? {} : { maxTokens: event.contextBudget }),
-    });
-  }
-
-  #checkpoint(task: Task, idempotencyKey: string) {
-    const previous = this.#contextOs.latestCheckpoint(this.#projectId, task.id);
-    return this.#contextOs.checkpoint(this.#projectId, {
-      taskId: task.id,
-      status: task.status,
-      phase: task.phase,
-      summary: previous
-        ? `Compaction checkpoint: ${previous.summary}`
-        : "Compaction boundary checkpoint with the active objective and known continuation state.",
-      state: continuationState(task, previous?.state),
-      idempotencyKey,
     });
   }
 

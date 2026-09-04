@@ -193,6 +193,7 @@ function uninstall(cwd: string, args: string[]): void {
   console.log(`Claude MCP permissions: ${result.plan.permissions} managed entries to remove`);
   console.log(`Claude rule: ${result.plan.managedRule ? "remove" : result.plan.modifiedRulePreserved ? "preserve modified file" : "unchanged"}`);
   console.log(`Codex MCP entry: ${codex.plan.managedEntry ? "remove" : "unchanged"}`);
+  console.log(`Codex Agent rule: ${codex.plan.managedRule ? "remove" : "unchanged"}`);
   console.log(`Codex App Server descriptor: ${codexAppServer.managedDescriptor ? "remove" : "unchanged"}`);
   if (parsed.values["dry-run"]) return console.log("Dry run only; no files were changed.");
   if (result.backupDir) console.log(`Integration backup: ${result.backupDir}`);

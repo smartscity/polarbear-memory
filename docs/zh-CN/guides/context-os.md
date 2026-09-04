@@ -12,14 +12,14 @@ polarbear-memory install
 
 之后正常使用 Codex 或 Claude Code。
 
-- Claude Code lifecycle hooks 会自动解析 durable Task、检索 prompt-specific Context、观察 tool 结果、在每个 turn 结束时提炼带标签的持久状态，并在 compaction 时创建 checkpoint。
-- Stock Codex 使用 MCP-assisted 兼容模式。Embedding client 可以显式安装并启动 Polarbear App Server gateway，在模型处理前拦截 turn。
+- Claude Code lifecycle hooks 会自动解析或创建 durable Task、检索 prompt-specific Context、观察有界 tool 结果、提炼带标签的持久状态，并在 turn、compaction 和 session 边界 checkpoint 已变化的工作。
+- Stock Codex 使用 MCP-assisted 兼容模式。安装程序会增加 managed `AGENTS.md` section，让 Codex 在正确边界调用 MCP Context 和 checkpoint 工具。Embedding client 可以显式安装并启动 Polarbear App Server gateway，在模型处理前拦截 turn。
 
 用户正常工作时不需要手动执行 Memory 命令。自动注入的 Context 需要更深历史信息时，仍可显式使用 MCP 搜索和检查。
 
 ## Session 边界
 
-Claude Code 使用安装好的 lifecycle hooks。`SessionStart` 和 `UserPromptSubmit` 注入有界 Context，`Stop` 与 `StopFailure` 执行 session-scoped 确定性提炼，`PreCompact` 保存 continuation state，`SessionEnd` 只执行有界的最终 flush。
+Claude Code 使用安装好的 lifecycle hooks。`SessionStart` 和 `UserPromptSubmit` 注入有界 Context，`Stop` 与 `StopFailure` 执行 session-scoped 确定性提炼并 checkpoint 已变化工作，`PreCompact` 保存 continuation state，`SessionEnd` 执行有界且幂等的最终 flush。
 
 Codex 默认使用项目级 MCP 配置。在可选的 managed gateway 中，Polarbear 会注入 prompt-specific Context，并观察官方 thread、turn、item、approval 与 compaction stream，但不会修改 approval decision。
 
@@ -31,6 +31,7 @@ Codex 默认使用项目级 MCP 配置。在可选的 managed gateway 中，Pola
 
 ```bash
 polarbear-memory task status
+polarbear-memory context status
 polarbear-memory context explain PACKET_ID
 polarbear-memory metrics --task TASK_ID
 polarbear-memory metrics --lifecycle

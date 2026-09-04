@@ -580,9 +580,18 @@ export async function dispatch(method: string, rawParams: unknown): Promise<unkn
     });
   }
   if (method === "contexts.current") {
-    return withProject(params.projectRoot, (store, project) => ({
-      packet: store.contextOs().currentContext(project.id) ?? null,
-    }));
+    return withProject(params.projectRoot, (store, project) => {
+      const packet = store.contextOs().currentContext(project.id);
+      const task = packet?.taskId ? store.contextOs().getTask(project.id, packet.taskId) : undefined;
+      const checkpoint = task ? store.contextOs().latestCheckpoint(project.id, task.id) : undefined;
+      return {
+        packet: packet ?? null,
+        receipt: packet ? store.contextOs().contextReceipt(project.id, packet.id) : null,
+        task: task ?? null,
+        latestCheckpoint: checkpoint ?? null,
+        safeToReplaceSession: Boolean(checkpoint),
+      };
+    });
   }
   if (method === "contexts.packet_explain") {
     return withProject(params.projectRoot, (store, project) => store.contextOs().explainContext(

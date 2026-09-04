@@ -8,13 +8,14 @@ test("extracts only explicitly labeled reusable handoff lines", () => {
   const candidates = extractCandidates(`
 Work completed successfully.
 - Decision: Keep settlement retries outside the transaction.
+- Constraint: Never bypass the settlement API.
 - Pitfall: Timestamp ordering is ambiguous in batch ingestion.
 - Task state: Recovery endpoint is implemented in \`src/recovery.ts\`.
 - Next step: Add authorization coverage in \`test/recovery.test.ts\`.
 I also looked around the repository.
 `);
-  assert.deepEqual(candidates.map((candidate) => candidate.type), ["DECISION", "PITFALL", "TASK_STATE", "TODO"]);
-  assert.deepEqual(candidates[2]?.files, ["src/recovery.ts"]);
+  assert.deepEqual(candidates.map((candidate) => candidate.type), ["DECISION", "CONSTRAINT", "PITFALL", "TASK_STATE", "TODO"]);
+  assert.deepEqual(candidates[3]?.files, ["src/recovery.ts"]);
 });
 
 test("does not extract conversational filler or unsafe relative paths", () => {

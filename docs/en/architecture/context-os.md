@@ -52,17 +52,20 @@ The provider-neutral `LifecycleOrchestrator` maps lifecycle events onto existing
 
 - hook payloads are bounded and redacted;
 - raw prompts are represented by digests;
-- SessionStart resolves an explicit or deterministic active Task and returns bounded continuation context;
+- SessionStart resolves an explicit, session-bound, uniquely continuable, or uniquely request-matched Task and returns bounded continuation context;
 - UserPromptSubmit uses the raw prompt transiently for retrieval and returns prompt-specific additional context before model processing;
-- Stop and StopFailure run session-scoped deterministic distillation, so SessionEnd is only a bounded final flush;
-- PreCompact preserves the previous structured continuation state instead of replacing it with a generic marker;
+- UserPromptSubmit creates a bounded Task summary when no continuable Task exists; multiple ambiguous Tasks remain unbound instead of being silently mixed;
+- tool observations retain bounded redacted outcome metadata and safe repository-relative artifact identities;
+- Stop and StopFailure run session-scoped deterministic distillation and build a continuation checkpoint;
+- PreCompact builds a checkpoint from the previous state plus accepted session observations instead of replacing it with a generic marker;
+- SessionEnd performs a bounded final flush and reuses an equivalent checkpoint rather than creating a duplicate;
 - PostCompact records the boundary; the next prompt performs rehydration because PostCompact does not support context injection;
 - duplicate event fingerprints are idempotent;
 - database failures spool events locally for later replay.
 
 The baseline distiller extracts only explicitly labeled reusable decisions, pitfalls, task state, and next steps. It does not claim general semantic understanding of arbitrary tool output.
 
-Stock Codex project integration remains MCP-assisted because it does not expose an equivalent project hook surface to Polarbear. The optional Polarbear Codex App Server gateway is a separate, explicitly installed managed path. It proxies the official bidirectional JSONL protocol, injects Context before `turn/start` and `turn/steer`, consumes thread/turn/item and compaction notifications, and forwards approvals and provider responses unchanged. Only clients launched through that descriptor are lifecycle-managed; ordinary Codex CLI/Desktop sessions remain MCP-assisted.
+Stock Codex project integration remains MCP-assisted because it does not expose an equivalent project hook surface to Polarbear. Installation adds a bounded managed section to the repository `AGENTS.md`, instructing Codex to retrieve Context at task entry and checkpoint substantive work before a session boundary. Existing project instructions are preserved. The optional Polarbear Codex App Server gateway is a separate, explicitly installed managed path. It proxies the official bidirectional JSONL protocol, injects Context before `turn/start` and `turn/steer`, consumes thread/turn/item and compaction notifications, and forwards approvals and provider responses unchanged. Only clients launched through that descriptor are lifecycle-managed; ordinary Codex CLI/Desktop sessions remain MCP-assisted.
 
 Lifecycle telemetry is stored as bounded aggregate counters rather than an unbounded event log. It reports provider/event distribution, accepted and fail-open outcomes, spool replay, retrieval and hook latency, injected token estimates, observation processing, checkpoint reasons, and automatically persisted hook Memory.
 

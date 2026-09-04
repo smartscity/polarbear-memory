@@ -228,6 +228,18 @@ test("Admin API 1.7 manages durable tasks, checkpoints and explainable Context P
     params: { projectRoot: fixture.root, packetId: packet.id },
   });
   assert.ok((explained.result as { budgetByCategory: object }).budgetByCategory);
+  assert.equal((explained.result as { receipt: { status: string } }).receipt.status, "BUILT");
+  const current = await request(handle, {
+    id: "context-os-current", apiVersion: ADMIN_API_VERSION, token, method: "contexts.current",
+    params: { projectRoot: fixture.root },
+  });
+  const currentContext = current.result as {
+    receipt: { status: string }; task: { id: string }; latestCheckpoint: { id: string }; safeToReplaceSession: boolean;
+  };
+  assert.equal(currentContext.receipt.status, "BUILT");
+  assert.equal(currentContext.task.id, task.id);
+  assert.ok(currentContext.latestCheckpoint.id);
+  assert.equal(currentContext.safeToReplaceSession, true);
   const lifecycleMetrics = await request(handle, {
     id: "context-os-5", apiVersion: ADMIN_API_VERSION, token, method: "usage.lifecycle",
     params: { projectRoot: fixture.root },

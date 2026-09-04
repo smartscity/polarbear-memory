@@ -295,3 +295,38 @@ test("SessionStart loads durable task context and PreCompact persists a checkpoi
     restoreEnvironment();
   }
 });
+
+test("Claude lifecycle creates task affinity and checkpoints changed files without Memory commands", () => {
+  const { root, project, restoreEnvironment } = fixture();
+  try {
+    const promptResult = ingestClaudeHook({
+      session_id: "automatic-task-session", cwd: root, hook_event_name: "UserPromptSubmit",
+      prompt: "Implement the automatic checkpoint path.",
+    }, root);
+    assert.match(promptResult.additionalContext ?? "", /Implement the automatic checkpoint path/u);
+    ingestClaudeHook({
+      session_id: "automatic-task-session", cwd: root, hook_event_name: "PostToolUse",
+      tool_name: "Write", tool_use_id: "write-one",
+      tool_input: { file_path: join(root, "src", "automatic-checkpoint.ts") },
+      tool_response: { success: true },
+    }, root);
+    ingestClaudeHook({
+      session_id: "automatic-task-session", cwd: root, hook_event_name: "Stop",
+      last_assistant_message: "Next step: Run the integration suite.",
+    }, root);
+
+    const verified = new SqliteMemoryStore(project.databasePath);
+    try {
+      const [task] = verified.contextOs().listTasks(project.id);
+      assert.ok(task);
+      const checkpoint = verified.contextOs().latestCheckpoint(project.id, task.id);
+      assert.ok(checkpoint);
+      assert.deepEqual(checkpoint.state.filesChanged, ["src/automatic-checkpoint.ts"]);
+      assert.deepEqual(checkpoint.state.remaining, ["Run the integration suite.", task.objective]);
+    } finally {
+      verified.close();
+    }
+  } finally {
+    restoreEnvironment();
+  }
+});

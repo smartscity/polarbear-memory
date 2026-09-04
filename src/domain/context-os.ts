@@ -32,6 +32,12 @@ export interface Task {
   completedAt?: string;
 }
 
+export interface TaskAffinityResolution {
+  task?: Task;
+  reason: "EXPLICIT" | "SESSION" | "ONLY_CONTINUABLE" | "REQUEST_MATCH" | "AUTO_CREATED" | "NONE" | "AMBIGUOUS";
+  ambiguousTaskIds: string[];
+}
+
 export interface CheckpointState {
   changed: string[];
   learned: string[];
@@ -261,11 +267,18 @@ export interface RotationDecision {
 
 export interface ContextOsPort {
   createTask(projectId: string, input: { title: string; objective: string; phase?: TaskPhase; priority?: number; parentTaskId?: string }): Task;
+  resolveTaskAffinity(projectId: string, input: {
+    preferredTaskId?: string; sessionRefHash: string; currentRequest?: string; createIfMissing?: boolean;
+  }): TaskAffinityResolution;
   getTask(projectId: string, taskId: string): Task | undefined;
   listTasks(projectId: string, status?: TaskStatus): Task[];
   latestCheckpoint(projectId: string, taskId: string): Checkpoint | undefined;
   listCheckpoints(projectId: string, taskId: string, limit?: number): Checkpoint[];
   checkpoint(projectId: string, input: { taskId: string; executionRunId?: string; status: TaskStatus; phase: TaskPhase; summary: string; state: CheckpointState; delta?: Partial<CheckpointState>; idempotencyKey?: string }): Checkpoint;
+  checkpointLifecycle(projectId: string, input: {
+    taskId: string; sessionRefHash: string; boundary: "TURN_COMPLETED" | "TURN_FAILED" | "BEFORE_COMPACTION" | "SESSION_ENDED";
+    idempotencyKey: string;
+  }): Checkpoint;
   listTaskRuns(projectId: string, taskId: string, limit?: number): ExecutionRun[];
   getTaskRunContext(projectId: string, taskId: string, runId: string): TaskRunContext;
   listAgentConnections(projectId: string): AgentConnectionStatus[];

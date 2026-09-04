@@ -53,6 +53,7 @@ Implemented capabilities include:
 | Provider integration | Claude hooks, common MCP, Codex/Claude managed adapters | Implemented |
 | Rotation and handoff | Deterministic policy, checkpoint boundary, resume recovery | Implemented |
 | Evaluation | Usage ledger, deterministic A/B/C fixtures, release gates | Implemented baseline |
+| Memory activation | Truthful delivery receipts, automatic task affinity/checkpoints, and usefulness visibility | In progress |
 | Multi-agent coordination | Parallel runs, conflict reconciliation, team policies | Deferred until real-project validation is stable |
 
 Roadmap status describes engineering scope. Public release readiness is tracked separately in [Release readiness](./release-readiness.md).

@@ -83,6 +83,29 @@ export class ContextTelemetryRepository {
     return rows.map((row) => this.#fromObservationRow(row));
   }
 
+  observationsForSession(projectId: string, taskId: string, sessionRefHash: string, limit = 500): Observation[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new Error("Observation history limit must be between 1 and 1000.");
+    }
+    const rows = this.#database.prepare(`
+      SELECT * FROM observations
+      WHERE project_id = ? AND task_id = ?
+        AND json_extract(payload_redacted_json, '$.sessionRefHash') = ?
+      ORDER BY occurred_at, id LIMIT ?
+    `).all(projectId, taskId, sessionRefHash, limit) as unknown as ObservationRow[];
+    return rows.map((row) => this.#fromObservationRow(row));
+  }
+
+  latestTaskIdForSession(projectId: string, sessionRefHash: string): string | undefined {
+    const row = this.#database.prepare(`
+      SELECT task_id FROM observations
+      WHERE project_id = ? AND task_id IS NOT NULL
+        AND json_extract(payload_redacted_json, '$.sessionRefHash') = ?
+      ORDER BY occurred_at DESC, rowid DESC LIMIT 1
+    `).get(projectId, sessionRefHash) as { task_id: string } | undefined;
+    return row?.task_id;
+  }
+
   markDistilled(projectId: string, observationIds: string[]): void {
     const update = this.#database.prepare("UPDATE observations SET persisted_as_memory = 1 WHERE project_id = ? AND id = ?");
     for (const id of observationIds) update.run(projectId, id);

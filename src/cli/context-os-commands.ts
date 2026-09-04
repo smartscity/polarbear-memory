@@ -83,7 +83,20 @@ export function contextOsCommand(cwd: string, args: string[]): void {
       console.log(JSON.stringify(store.contextOs().explainContext(project.id, rest[0]), null, 2));
       return;
     }
-    throw new Error("context requires `build --request TEXT` or `explain PACKET_ID`.");
+    if (action === "status" && rest.length === 0) {
+      const packet = store.contextOs().currentContext(project.id);
+      const task = packet?.taskId ? store.contextOs().getTask(project.id, packet.taskId) : undefined;
+      const checkpoint = task ? store.contextOs().latestCheckpoint(project.id, task.id) : undefined;
+      console.log(JSON.stringify({
+        packet: packet ?? null,
+        receipt: packet ? store.contextOs().contextReceipt(project.id, packet.id) : null,
+        task: task ?? null,
+        latestCheckpoint: checkpoint ?? null,
+        safeToReplaceSession: Boolean(checkpoint),
+      }, null, 2));
+      return;
+    }
+    throw new Error("context requires `build --request TEXT`, `explain PACKET_ID`, or `status`.");
   } finally {
     store.close();
   }

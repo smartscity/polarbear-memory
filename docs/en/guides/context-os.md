@@ -12,14 +12,14 @@ polarbear-memory install
 
 Then use Codex or Claude Code normally.
 
-- Claude Code lifecycle hooks automatically resolve durable task state, retrieve prompt-specific Context, observe tool outcomes, distill labeled durable state at the end of each turn, and checkpoint compaction.
-- Stock Codex uses MCP-assisted compatibility mode. For an embedding client, install and launch the explicit Polarbear App Server gateway to intercept turns before model processing.
+- Claude Code lifecycle hooks automatically resolve or create durable task state, retrieve prompt-specific Context, observe bounded tool outcomes, distill labelled durable state, and checkpoint changed work at turn, compaction, and session boundaries.
+- Stock Codex uses MCP-assisted compatibility mode. Installation adds a managed `AGENTS.md` section so Codex calls the MCP Context and checkpoint tools at the appropriate boundaries. For an embedding client, install and launch the explicit Polarbear App Server gateway to intercept turns before model processing.
 
 Users do not invoke Memory commands manually during normal work. Explicit MCP search and inspection remain available when the automatically injected Context needs deeper historical detail.
 
 ## Session boundaries
 
-Claude Code uses installed lifecycle hooks. `SessionStart` and `UserPromptSubmit` inject bounded Context, `Stop` and `StopFailure` perform session-scoped deterministic distillation, `PreCompact` persists continuation state, and `SessionEnd` performs only a bounded final flush.
+Claude Code uses installed lifecycle hooks. `SessionStart` and `UserPromptSubmit` inject bounded Context, `Stop` and `StopFailure` perform session-scoped deterministic distillation and checkpoint changed work, `PreCompact` persists continuation state, and `SessionEnd` performs a bounded idempotent final flush.
 
 Codex uses project-scoped MCP configuration by default. In the optional managed gateway, Polarbear injects prompt-specific Context and observes the official thread, turn, item, approval, and compaction stream without changing approval decisions.
 
@@ -31,6 +31,7 @@ Manual commands are available for inspection and diagnostics, not as the normal 
 
 ```bash
 polarbear-memory task status
+polarbear-memory context status
 polarbear-memory context explain PACKET_ID
 polarbear-memory metrics --task TASK_ID
 polarbear-memory metrics --lifecycle

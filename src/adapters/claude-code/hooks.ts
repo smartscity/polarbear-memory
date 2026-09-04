@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import * as z from "zod/v4";
 import { LifecycleOrchestrator } from "../../application/lifecycle-orchestrator.js";
 import { acknowledgeSessionEvents } from "../../application/finalization.js";
@@ -73,6 +73,21 @@ function boundedRetrievalPrompt(value: string, maxBytes = 16 * 1024): string {
   return redacted.slice(0, lower);
 }
 
+function toolArtifactRefs(value: unknown, projectRoots: string[]): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const refs: string[] = [];
+  for (const [key, candidate] of Object.entries(value)) {
+    if (!/^(?:file_?path|path)$/iu.test(key) || typeof candidate !== "string") continue;
+    const normalized = isAbsolute(candidate)
+      ? projectRoots.map((root) => relative(root, candidate))
+        .find((path) => path && !path.startsWith("..") && !isAbsolute(path))
+      : candidate;
+    if (!normalized || normalized.startsWith("..") || isAbsolute(normalized) || normalized.length > 1_024) continue;
+    refs.push(normalized.replaceAll("\\", "/"));
+  }
+  return [...new Set(refs)].slice(0, 20);
+}
+
 function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.infer<typeof HookInput>, now: Date): EventEnvelope {
   const eventTypes = {
     SessionStart: "AGENT_SESSION_START", UserPromptSubmit: "AGENT_USER_PROMPT", PreToolUse: "AGENT_PRE_TOOL",
@@ -82,6 +97,7 @@ function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.inf
   } as const;
   const eventType = eventTypes[raw.hook_event_name];
   const boundedJson = (value: unknown): string => redactText(JSON.stringify(value ?? {}).slice(0, 32 * 1024), homedir());
+  const artifactRefs = toolArtifactRefs(raw.tool_input, [project.root, raw.cwd]);
   const payload: Record<string, string | boolean> = {
     hookEventName: raw.hook_event_name,
     ...(raw.last_assistant_message ? { lastAssistantMessage: redactText(raw.last_assistant_message.slice(0, 32 * 1024), homedir()) } : {}),
@@ -92,6 +108,7 @@ function makeEnvelope(project: ProjectBinding, policy: ProjectPolicy, raw: z.inf
     ...(raw.tool_name ? { toolName: raw.tool_name } : {}),
     ...(raw.tool_use_id ? { toolUseId: raw.tool_use_id } : {}),
     ...(raw.tool_input !== undefined ? { toolInput: boundedJson(raw.tool_input) } : {}),
+    ...(artifactRefs.length > 0 ? { artifactRefs: JSON.stringify(artifactRefs) } : {}),
     ...(raw.tool_response !== undefined ? { toolResponse: boundedJson(raw.tool_response) } : {}),
     ...(raw.error !== undefined ? { error: boundedJson(raw.error) } : {}),
     ...(raw.tool_results !== undefined ? { toolResults: boundedJson(raw.tool_results) } : {}),

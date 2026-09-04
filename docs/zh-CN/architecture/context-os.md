@@ -40,17 +40,20 @@ Provider-neutral `LifecycleOrchestrator` 把 lifecycle event 映射到已有 Con
 
 - payload 限长并脱敏；
 - prompt 只保存 digest；
-- SessionStart 解析显式 Task，或按确定性策略选择可继续 Task，并返回有界 continuation context；
+- SessionStart 依次解析显式、同 session 绑定、唯一可继续或按请求唯一匹配的 Task，并返回有界 continuation context；
 - UserPromptSubmit 只在检索期间临时使用原始 prompt，并在模型处理前返回 prompt-specific additional context；
-- Stop 和 StopFailure 执行 session-scoped 确定性 distillation，SessionEnd 只负责有界的最终 flush；
-- PreCompact 保留已有结构化 continuation state，不再用通用 marker 覆盖；
+- 没有可继续 Task 时，UserPromptSubmit 会创建有界 Task 摘要；存在多个歧义 Task 时保持未绑定，不静默混合状态；
+- tool observation 保留有界、脱敏的结果元数据和安全的仓库相对 artifact 标识；
+- Stop 与 StopFailure 执行 session-scoped 确定性 distillation 并生成 continuation checkpoint；
+- PreCompact 使用旧状态和已接受的 session observation 构建 checkpoint，不再用通用 marker 覆盖；
+- SessionEnd 执行有界最终 flush；状态等价时复用 checkpoint，不生成重复记录；
 - PostCompact 记录边界；由于该事件不能注入 context，下一次 prompt 负责 rehydration；
 - fingerprint 保证幂等；
 - 数据库失败时写入本地 spool，稍后 replay。
 
 当前 distiller 只提取明确标记的 decision、pitfall、task state 和 next step，不声称能理解任意 tool output。
 
-Stock Codex 项目集成仍为 MCP-assisted，因为它没有向 Polarbear 暴露等价的项目 hook surface。可选的 Polarbear Codex App Server gateway 是独立、显式安装的 managed path：它代理官方双向 JSONL protocol，在 `turn/start` 和 `turn/steer` 之前注入 Context，消费 thread/turn/item 与 compaction notification，并原样转发 approval 和 provider response。只有通过该 descriptor 启动的 client 才是 lifecycle-managed；普通 Codex CLI/Desktop session 仍为 MCP-assisted。
+Stock Codex 项目集成仍为 MCP-assisted，因为它没有向 Polarbear 暴露等价的项目 hook surface。安装程序会在仓库 `AGENTS.md` 中增加有界 managed section，要求 Codex 在任务开始时召回 Context，并在 session 边界前 checkpoint 实质性工作；原有项目指令保持不变。可选的 Polarbear Codex App Server gateway 是独立、显式安装的 managed path：它代理官方双向 JSONL protocol，在 `turn/start` 和 `turn/steer` 之前注入 Context，消费 thread/turn/item 与 compaction notification，并原样转发 approval 和 provider response。只有通过该 descriptor 启动的 client 才是 lifecycle-managed；普通 Codex CLI/Desktop session 仍为 MCP-assisted。
 
 Lifecycle telemetry 使用有界聚合 counter，而不是无限增长的 event log。它报告 provider/event 分布、accepted 与 fail-open outcome、spool replay、retrieval 与 hook latency、Context 构建/交付/失败、注入 token 估算、observation processing、checkpoint reason，以及 hook 自动持久化的 Memory。Schema v10 增加 Context delivery receipt；迁移保持 additive，并具备 backup、transaction 与 foreign-key check。
 

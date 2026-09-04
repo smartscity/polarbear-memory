@@ -63,6 +63,7 @@ export async function runCodexCommand(cwd: string, args: string[]): Promise<void
     runtime: resolveAgentRuntime(),
   });
   console.log(`MCP config: ${result.plan.configPath}`);
+  console.log(`Agent rule: ${result.plan.rulePath}`);
   if (result.plan.alreadyInstalled) console.log("Codex integration is already installed.");
   else if (parsed.values["dry-run"]) console.log("Dry run only; no files were changed.");
   else {

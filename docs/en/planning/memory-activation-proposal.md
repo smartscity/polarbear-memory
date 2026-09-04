@@ -2,17 +2,17 @@
 
 [简体中文](../../zh-CN/planning/memory-activation-proposal.md)
 
-Status: **Draft for product review**
+Status: **Option A approved; implementation in progress**
 
-This document proposes the next product direction for Polarbear Memory. It does not declare approved scope or implemented behavior. After review, the selected direction should be incorporated into the product roadmap and delivered through reviewed design and implementation changes.
+This document records the reviewed direction for Polarbear Memory activation. The formal delivery status remains owned by the product roadmap; implemented behavior is documented in the architecture and user guides instead of being duplicated here.
 
-## Decision requested
+## Review outcome
 
-Choose one primary direction:
+The product review selected option A as the primary direction. Options B and C remain conditional future choices:
 
 | Option | Primary outcome | Recommendation |
 |---|---|---|
-| A. Activation first | Existing Memory is captured, delivered, used, and measured without routine user commands | **Recommended next** |
+| A. Activation first | Existing Memory is captured, delivered, used, and measured without routine user commands | **Selected** |
 | B. Retrieval intelligence | Paraphrases, cross-language requests, and large Memory collections recall better | Start only after activation metrics identify retrieval misses |
 | C. Managed Context OS | Polarbear controls more of the Codex and Claude lifecycle through managed gateways | Treat as an explicit product commitment after option A |
 
@@ -242,15 +242,13 @@ Each increment should include migration behavior, failure diagnostics, automated
 - replacing provider-native compaction;
 - claiming provider billing savings from logical token estimates alone.
 
-## Review checklist
+## Approved decisions
 
-The reviewer should decide:
+- [x] Approve option A as the next primary direction.
+- [x] Approve the target contract that normal users do not operate Memory commands.
+- [x] Accept that stock Codex remains explicitly MCP-assisted until a managed path is used.
+- [x] Approve the activation acceptance gates.
+- [x] Defer semantic retrieval until activation telemetry proves candidate-stage misses.
+- [x] Defer managed Context OS expansion until activation is validated.
 
-- [ ] Approve option A as the next primary direction.
-- [ ] Approve the target contract that normal users do not operate Memory commands.
-- [ ] Accept that stock Codex remains explicitly MCP-assisted until a managed path is used.
-- [ ] Approve the activation acceptance gates.
-- [ ] Defer semantic retrieval until activation telemetry proves candidate-stage misses.
-- [ ] Defer managed Context OS expansion until activation is validated.
-
-Requested changes should be made in this proposal before implementation begins. Approval should then update [Product and roadmap](./product-and-roadmap.md) with the selected scope; this draft should not become a second permanent source of roadmap truth.
+Delivery status and remaining acceptance work are tracked only in [Product and roadmap](./product-and-roadmap.md), so this reviewed proposal does not become a second roadmap source of truth.

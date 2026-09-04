@@ -25,7 +25,7 @@ The contract currently covers:
 - system version/capability negotiation;
 - project status, diagnostics, and configuration;
 - complete Memory CRUD, explicit human rejection, lifecycle, relation, feedback, and purge preview;
-- context compilation, latest-packet retrieval, and explanation;
+- context compilation, latest-packet retrieval, delivery receipts, safe-session-boundary state, and explanation;
 - Task creation, checkpoint history, execution history, and run context;
 - persisted agent connection/activity summaries plus managed Codex and Claude Code configuration, runtime, handshake health, lifecycle capability, effective integration mode, and repair;
 - observation distillation, Context OS usage metrics, and lifecycle counters/latency;

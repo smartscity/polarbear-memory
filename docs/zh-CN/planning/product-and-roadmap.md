@@ -53,6 +53,7 @@ Polarbear 采集可复用的工程证据，沉淀长期知识，在 token 预算
 | Provider 集成 | Claude hooks、通用 MCP、Codex/Claude runtime | 已实现 |
 | Rotation 与 handoff | 确定性策略、checkpoint 边界、resume 恢复 | 已实现 |
 | 评估 | Usage ledger、A/B/C fixture、发布门禁 | 基线已实现 |
+| Memory 激活 | 可信交付 receipt、自动 Task affinity/checkpoint 与有效性可见性 | 进行中 |
 | 多 Agent 协同 | 并行执行、冲突协调、团队策略 | 等待真实项目验证稳定后立项 |
 
 工程范围完成不等于公开发布认证，发布状态见[发布就绪状态](./release-readiness.md)。
