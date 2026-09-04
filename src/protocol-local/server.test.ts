@@ -198,7 +198,7 @@ test("manages V2 records, task completion, feedback and resettable token savings
   assert.equal((reset.result as { resetCount: number }).resetCount, 1);
 });
 
-test("Admin API 1.6 manages durable tasks, checkpoints and explainable Context Packets", async () => {
+test("Admin API 1.7 manages durable tasks, checkpoints and explainable Context Packets", async () => {
   const fixture = repository();
   const handle = await startAdminApi(fixture.dataRoot);
   handles.push(handle);

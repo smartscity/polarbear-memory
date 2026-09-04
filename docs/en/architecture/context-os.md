@@ -42,7 +42,7 @@ The planner combines task state, latest checkpoint, hybrid Memory search, and re
 
 Optional architecture, episodic, verification, and semantic candidates are admitted only within their category and total budgets. Large items are truncated but retain source IDs for progressive disclosure. The final rendered packet is never allowed to exceed its configured hard budget.
 
-Every packet records its hash, sources, selection reasons, category usage, exclusions, estimated tokens, and retrieval latency. Raw current requests are returned to the caller but only a digest is persisted.
+Every packet records its hash, sources, selection reasons, category usage, exclusions, estimated tokens, and retrieval latency. Raw current requests are returned to the caller but only a digest is persisted. Packet construction, delivery, and delivery failure are accounted separately. A Context receipt reports the task, checkpoint, selected source counts, integration mode, delivery point, and latest delivery outcome; constructing a packet alone is not evidence that an Agent received it.
 
 When no explicit hard budget is supplied, the planner chooses an automatic budget between 500 and 8,000 tokens from request size, task/checkpoint presence, mandatory items, and the bounded retrieved candidate set. A workspace in `custom` mode always supplies its configured hard budget instead. Automatic budgeting is deterministic and never bypasses the 12,000-token absolute safety limit.
 
@@ -82,7 +82,7 @@ Resume failure records the failed run and falls back to a fresh session using th
 
 ## Persistence
 
-Schema v9 includes tasks, agent sessions, execution runs, observations, checkpoints, retrieval runs, context packets/items, usage ledger records, and bounded lifecycle counters. The migration is additive, backed up, transactional, and foreign-key checked.
+Schema v10 includes tasks, agent sessions, execution runs, observations, checkpoints, retrieval runs, context packets/items, Context delivery receipts, usage ledger records, and bounded lifecycle counters. The migration is additive, backed up, transactional, and foreign-key checked.
 
 ## Desktop UX contract
 

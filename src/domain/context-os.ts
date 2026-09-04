@@ -88,8 +88,32 @@ export interface ContextPacket {
   createdAt: string;
 }
 
+export type ContextDeliveryStatus = "BUILT" | "DELIVERED" | "FAILED";
+export type ContextDeliveryMode = "ASSISTED" | "MANAGED";
+
+export interface ContextReceipt {
+  packetId: string;
+  projectId: string;
+  taskId?: string;
+  checkpointId?: string;
+  provider?: string;
+  integrationMode?: ContextDeliveryMode;
+  deliveryPoint?: string;
+  status: ContextDeliveryStatus;
+  candidateCount: number;
+  selectedCount: number;
+  selectedMemoryCount: number;
+  sourceCounts: Record<ContextPacketItem["sourceType"], number>;
+  estimatedTokens: number;
+  builtAt: string;
+  deliveredAt?: string;
+  failureCode?: string;
+  failureReason?: string;
+}
+
 export interface ContextExplanation {
   packet: ContextPacket;
+  receipt: ContextReceipt;
   budgetByCategory: Record<string, { used: number; limit: number }>;
   excluded: Array<{ sourceId: string; category: ContextCategory; reason: string; estimatedTokens: number }>;
 }
@@ -198,6 +222,10 @@ export interface LifecycleMetrics {
   observationsPending: number;
   observationsProcessed: number;
   retrievalRuns: number;
+  contextPacketsBuilt: number;
+  contextPacketsDelivered: number;
+  contextDeliveryFailures: number;
+  deliveredEstimatedTokens: number;
   contextPacketsInjected: number;
   injectedEstimatedTokens: number;
   averageRetrievalLatencyMs: number;
@@ -246,6 +274,16 @@ export interface ContextOsPort {
   buildContext(projectId: string, input: { currentRequest: string; taskId?: string; maxTokens?: number; provider?: string }): ContextPacket;
   currentContext(projectId: string): ContextPacket | undefined;
   explainContext(projectId: string, packetId: string): ContextExplanation;
+  contextReceipt(projectId: string, packetId: string): ContextReceipt;
+  recordContextDelivery(projectId: string, packetId: string, input: {
+    provider: string;
+    integrationMode: ContextDeliveryMode;
+    deliveryPoint: string;
+    status: "DELIVERED" | "FAILED";
+    sourceFingerprint: string;
+    failureCode?: string;
+    failureReason?: string;
+  }): ContextReceipt;
   recordObservation(projectId: string, input: Omit<Observation, "id" | "projectId"> & { sourceFingerprint?: string }): Observation;
   distill(projectId: string, limit?: number, sessionRefHash?: string): { observations: number; candidates: number; recorded: number };
   recordUsage(projectId: string, input: Omit<UsageLedgerEntry, "id" | "projectId" | "createdAt">): UsageLedgerEntry;

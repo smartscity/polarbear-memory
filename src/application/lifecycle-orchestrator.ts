@@ -90,6 +90,10 @@ export class LifecycleOrchestrator {
     }
   }
 
+  recordContextDelivery(packetId: string, input: Parameters<ContextOsPort["recordContextDelivery"]>[2]) {
+    return this.#contextOs.recordContextDelivery(this.#projectId, packetId, input);
+  }
+
   #resolveTask(preferredTaskId?: string): Task | undefined {
     if (preferredTaskId) {
       const preferred = this.#contextOs.getTask(this.#projectId, preferredTaskId);

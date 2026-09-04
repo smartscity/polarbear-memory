@@ -200,6 +200,7 @@ export class ContextPlanner {
       candidateCount: candidates.length, selectedCount: items.length,
       candidateTokens: fixedTokens + candidates.reduce((sum, item) => sum + item.estimatedTokens, 0),
       selectedTokens: estimatedTokens, latencyMs: Math.max(0, Date.now() - started), budgets, excluded,
+      candidateMemoryIds: candidates.filter((candidate) => candidate.sourceType === "MEMORY").map((candidate) => candidate.sourceId),
     };
     const saved = this.#packets.save(projectId, {
       ...(task ? { taskId: task.id } : {}), currentRequest: request, ...(input.provider ? { provider: input.provider } : {}),

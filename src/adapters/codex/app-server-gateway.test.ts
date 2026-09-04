@@ -5,6 +5,7 @@ import { CodexAppServerGateway } from "./app-server-gateway.js";
 
 function harness() {
   const events: AgentLifecycleEvent[] = [];
+  const deliveries: Array<{ packetId: string; deliveryPoint: string }> = [];
   const gateway = new CodexAppServerGateway({
     handle(event): AgentLifecycleOutcome {
       events.push(event);
@@ -23,12 +24,15 @@ function harness() {
         } : {}),
       };
     },
+    recordContextDelivery(packetId, input) {
+      deliveries.push({ packetId, deliveryPoint: input.deliveryPoint });
+    },
   }, { preferredTaskId: "task-1", contextBudget: 900 });
-  return { events, gateway };
+  return { deliveries, events, gateway };
 }
 
 test("injects prompt-specific Context before turn/start without persisting the raw prompt", () => {
-  const { events, gateway } = harness();
+  const { deliveries, events, gateway } = harness();
   const request = {
     id: 7,
     method: "turn/start",
@@ -44,9 +48,11 @@ test("injects prompt-specific Context before turn/start without persisting the r
   assert.equal(events[0]?.contextBudget, 900);
   assert.equal(events[0]?.currentRequest, "Fix private-marker-4271.");
   assert.doesNotMatch(JSON.stringify(events[0]?.payload), /private-marker-4271/u);
+  assert.deepEqual(deliveries, [{ packetId: "packet-1", deliveryPoint: "CODEX_APP_SERVER_TURN_INPUT" }]);
 
   assert.deepEqual(gateway.transformClientMessage(request), transformed);
   assert.equal(events.length, 1);
+  assert.equal(deliveries.length, 1);
 });
 
 test("maps streamed thread, tool, compaction, assistant, and turn events to the shared lifecycle", () => {

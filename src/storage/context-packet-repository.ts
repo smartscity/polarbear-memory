@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { ContextExplanation, ContextPacket, ContextPacketItem } from "../domain/context-os.js";
+import type {
+  ContextDeliveryMode, ContextExplanation, ContextPacket, ContextPacketItem, ContextReceipt,
+} from "../domain/context-os.js";
 import { inImmediateTransaction } from "./sqlite-transaction.js";
 
 interface PacketRow {
@@ -13,6 +15,18 @@ interface ItemRow {
   rank: number; source_type: ContextPacketItem["sourceType"]; source_id: string;
   category: ContextPacketItem["category"]; priority: 0 | 1 | 2 | 3; score_milli: number;
   estimated_tokens: number; reason: string; content: string; truncated: number;
+}
+
+interface DeliveryRow {
+  packet_id: string;
+  provider: string;
+  integration_mode: ContextDeliveryMode;
+  delivery_point: string;
+  status: "DELIVERED" | "FAILED";
+  failure_code: string | null;
+  failure_reason: string | null;
+  source_fingerprint: string;
+  created_at: string;
 }
 
 function itemFromRow(row: ItemRow): ContextPacketItem {
@@ -33,6 +47,7 @@ export interface RetrievalRecord {
   latencyMs: number;
   budgets: Record<string, { used: number; limit: number }>;
   excluded: ContextExplanation["excluded"];
+  candidateMemoryIds: string[];
 }
 
 export class ContextPacketRepository {
@@ -91,6 +106,26 @@ export class ContextPacketRepository {
           item.estimatedTokens, item.reason, item.content, item.truncated ? 1 : 0,
         );
       }
+      const candidateMemoryIds = [...new Set(input.retrieval.candidateMemoryIds)].slice(0, 100);
+      const selectedMemoryIds = new Set(input.items
+        .filter((item) => item.sourceType === "MEMORY")
+        .map((item) => item.sourceId));
+      const noteCandidate = this.#database.prepare(`
+        UPDATE knowledge_usage_stats
+        SET candidate_count = candidate_count + 1, last_candidate_at = ?
+        WHERE knowledge_id = ?
+          AND EXISTS (SELECT 1 FROM knowledge_units WHERE id = ? AND project_id = ?)
+      `);
+      const noteSelected = this.#database.prepare(`
+        UPDATE knowledge_usage_stats
+        SET selected_count = selected_count + 1, last_selected_at = ?
+        WHERE knowledge_id = ?
+          AND EXISTS (SELECT 1 FROM knowledge_units WHERE id = ? AND project_id = ?)
+      `);
+      for (const memoryId of candidateMemoryIds) {
+        noteCandidate.run(now, memoryId, memoryId, projectId);
+        if (selectedMemoryIds.has(memoryId)) noteSelected.run(now, memoryId, memoryId, projectId);
+      }
     });
     return this.require(projectId, id);
   }
@@ -129,8 +164,85 @@ export class ContextPacketRepository {
       .get(projectId, packet.retrievalRunId) as { budget_json: string; exclusions_json: string };
     return {
       packet,
+      receipt: this.receipt(projectId, packetId),
       budgetByCategory: JSON.parse(retrieval.budget_json) as ContextExplanation["budgetByCategory"],
       excluded: JSON.parse(retrieval.exclusions_json) as ContextExplanation["excluded"],
+    };
+  }
+
+  recordDelivery(projectId: string, packetId: string, input: {
+    provider: string;
+    integrationMode: ContextDeliveryMode;
+    deliveryPoint: string;
+    status: "DELIVERED" | "FAILED";
+    sourceFingerprint: string;
+    failureCode?: string;
+    failureReason?: string;
+  }): ContextReceipt {
+    this.require(projectId, packetId);
+    const values = [input.provider, input.deliveryPoint, input.sourceFingerprint, input.failureCode, input.failureReason]
+      .filter((value): value is string => value !== undefined);
+    if (values.some((value) => value.length === 0 || value.length > 2_048)) {
+      throw new Error("Context delivery fields must contain between 1 and 2048 characters.");
+    }
+    if (input.status === "FAILED" && !input.failureCode) {
+      throw new Error("A failed Context delivery requires a failure code.");
+    }
+    if (input.status === "DELIVERED" && (input.failureCode || input.failureReason)) {
+      throw new Error("A successful Context delivery cannot contain failure details.");
+    }
+    const existing = this.#database.prepare(`
+      SELECT * FROM context_deliveries WHERE project_id = ? AND source_fingerprint = ?
+    `).get(projectId, input.sourceFingerprint) as DeliveryRow | undefined;
+    if (existing) {
+      if (existing.packet_id !== packetId || existing.status !== input.status) {
+        throw new Error("Context delivery fingerprint is already associated with another outcome.");
+      }
+      return this.receipt(projectId, packetId);
+    }
+    this.#database.prepare(`
+      INSERT INTO context_deliveries(
+        id, project_id, packet_id, provider, integration_mode, delivery_point,
+        status, failure_code, failure_reason, source_fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(), projectId, packetId, input.provider, input.integrationMode, input.deliveryPoint,
+      input.status, input.failureCode ?? null, input.failureReason ?? null, input.sourceFingerprint,
+      new Date().toISOString(),
+    );
+    return this.receipt(projectId, packetId);
+  }
+
+  receipt(projectId: string, packetId: string): ContextReceipt {
+    const packet = this.require(projectId, packetId);
+    const retrieval = this.#database.prepare(`
+      SELECT candidate_count FROM retrieval_runs WHERE project_id = ? AND id = ?
+    `).get(projectId, packet.retrievalRunId) as { candidate_count: number };
+    const sourceCounts: ContextReceipt["sourceCounts"] = { TASK: 0, CHECKPOINT: 0, MEMORY: 0 };
+    for (const item of packet.items) sourceCounts[item.sourceType] += 1;
+    const delivery = this.#database.prepare(`
+      SELECT * FROM context_deliveries
+      WHERE project_id = ? AND packet_id = ?
+      ORDER BY created_at DESC, rowid DESC LIMIT 1
+    `).get(projectId, packetId) as DeliveryRow | undefined;
+    const checkpointId = packet.items.find((item) => item.sourceType === "CHECKPOINT")?.sourceId;
+    return {
+      packetId: packet.id,
+      projectId,
+      ...(packet.taskId ? { taskId: packet.taskId } : {}),
+      ...(checkpointId ? { checkpointId } : {}),
+      ...(delivery?.provider ?? packet.provider ? { provider: delivery?.provider ?? packet.provider } : {}),
+      ...(delivery ? { integrationMode: delivery.integration_mode, deliveryPoint: delivery.delivery_point } : {}),
+      status: delivery?.status ?? "BUILT",
+      candidateCount: retrieval.candidate_count,
+      selectedCount: packet.items.length,
+      selectedMemoryCount: sourceCounts.MEMORY,
+      sourceCounts,
+      estimatedTokens: packet.estimatedTokens,
+      builtAt: packet.createdAt,
+      ...(delivery ? { deliveredAt: delivery.created_at } : {}),
+      ...(delivery?.failure_code ? { failureCode: delivery.failure_code } : {}),
+      ...(delivery?.failure_reason ? { failureReason: delivery.failure_reason } : {}),
     };
   }
 }

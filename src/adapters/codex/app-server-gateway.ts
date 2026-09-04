@@ -7,6 +7,15 @@ type JsonObject = Record<string, unknown>;
 
 export interface LifecycleEventHandler {
   handle(event: AgentLifecycleEvent): AgentLifecycleOutcome;
+  recordContextDelivery?(packetId: string, input: {
+    provider: string;
+    integrationMode: "ASSISTED" | "MANAGED";
+    deliveryPoint: string;
+    status: "DELIVERED" | "FAILED";
+    sourceFingerprint: string;
+    failureCode?: string;
+    failureReason?: string;
+  }): unknown;
 }
 
 const TOOL_ITEM_TYPES = new Set([
@@ -128,6 +137,17 @@ export class CodexAppServerGateway {
         input: [...input, { type: "text", text: outcome.contextPacket.rendered }],
       },
     };
+    try {
+      this.#handler.recordContextDelivery?.(outcome.contextPacket.id, {
+        provider: "codex-app-server",
+        integrationMode: "MANAGED",
+        deliveryPoint: "CODEX_APP_SERVER_TURN_INPUT",
+        status: "DELIVERED",
+        sourceFingerprint: `codex-app-server:${String(message.id)}:${outcome.contextPacket.id}`,
+      });
+    } catch {
+      // Delivery accounting must not corrupt an otherwise valid provider protocol frame.
+    }
     if (cacheKey) {
       this.#requestCache.set(cacheKey, transformed);
       if (this.#requestCache.size > 128) this.#requestCache.delete(this.#requestCache.keys().next().value as string);

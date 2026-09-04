@@ -43,7 +43,14 @@ export function registerContextOsTools(server: McpServer, store: MemoryStore, pr
         currentRequest: current_request, ...(task_id ? { taskId: task_id } : {}), maxTokens: max_tokens,
         ...(provider ? { provider } : {}),
       });
-      return json({ trustBoundary: TRUST_BOUNDARY, ...packet });
+      const receipt = store.contextOs().recordContextDelivery(project.id, packet.id, {
+        provider: provider ?? "mcp-client",
+        integrationMode: "ASSISTED",
+        deliveryPoint: "MCP_TOOL_RESULT",
+        status: "DELIVERED",
+        sourceFingerprint: `mcp-context-get:${packet.id}`,
+      });
+      return json({ trustBoundary: TRUST_BOUNDARY, ...packet, receipt });
     } catch (error) {
       return safeError(error);
     }

@@ -103,6 +103,18 @@ export class ContextOsService implements ContextOsPort {
     return this.#packets.explain(projectId, packetId);
   }
 
+  contextReceipt(projectId: string, packetId: string) {
+    return this.#packets.receipt(projectId, packetId);
+  }
+
+  recordContextDelivery(
+    projectId: string,
+    packetId: string,
+    input: Parameters<ContextOsPort["recordContextDelivery"]>[2],
+  ) {
+    return this.#packets.recordDelivery(projectId, packetId, input);
+  }
+
   recordObservation(
     projectId: string,
     input: Omit<Observation, "id" | "projectId"> & { sourceFingerprint?: string },

@@ -30,7 +30,7 @@ Planner 合并 Task、最新 Checkpoint、混合 Memory 检索和近期 task-sco
 
 可选 Architecture、Episode、Verification 和 Semantic 候选只有在分类预算与总预算内才能进入。长内容可以截断，但保留 source ID。最终 packet 不得超过硬 token budget。
 
-Packet 保存 hash、来源、选择原因、分类预算、排除原因、token 估算与检索耗时。当前请求只在返回值中存在，持久化时保存 digest。
+Packet 保存 hash、来源、选择原因、分类预算、排除原因、token 估算与检索耗时。当前请求只在返回值中存在，持久化时保存 digest。Packet 构建、交付和交付失败分别记账。Context Receipt 展示 task、checkpoint、选中来源数量、集成模式、交付点和最新交付结果；仅构建 Packet 不能证明 Agent 已经收到它。
 
 未提供明确硬预算时，Planner 会根据请求规模、Task/Checkpoint、强制项和有界检索候选集，在 500 到 8,000 Token 之间确定自动预算。Workspace 使用 `custom` 模式时始终传入配置的硬预算。自动预算是确定性的，并且不会绕过 12,000 Token 的绝对安全上限。
 
@@ -52,7 +52,7 @@ Provider-neutral `LifecycleOrchestrator` 把 lifecycle event 映射到已有 Con
 
 Stock Codex 项目集成仍为 MCP-assisted，因为它没有向 Polarbear 暴露等价的项目 hook surface。可选的 Polarbear Codex App Server gateway 是独立、显式安装的 managed path：它代理官方双向 JSONL protocol，在 `turn/start` 和 `turn/steer` 之前注入 Context，消费 thread/turn/item 与 compaction notification，并原样转发 approval 和 provider response。只有通过该 descriptor 启动的 client 才是 lifecycle-managed；普通 Codex CLI/Desktop session 仍为 MCP-assisted。
 
-Lifecycle telemetry 使用有界聚合 counter，而不是无限增长的 event log。它报告 provider/event 分布、accepted 与 fail-open outcome、spool replay、retrieval 与 hook latency、注入 token 估算、observation processing、checkpoint reason，以及 hook 自动持久化的 Memory。Schema v9 增加有界 lifecycle counter；迁移保持 additive，并具备 backup、transaction 与 foreign-key check。
+Lifecycle telemetry 使用有界聚合 counter，而不是无限增长的 event log。它报告 provider/event 分布、accepted 与 fail-open outcome、spool replay、retrieval 与 hook latency、Context 构建/交付/失败、注入 token 估算、observation processing、checkpoint reason，以及 hook 自动持久化的 Memory。Schema v10 增加 Context delivery receipt；迁移保持 additive，并具备 backup、transaction 与 foreign-key check。
 
 ## Managed runtime 与 rotation
 

@@ -41,11 +41,11 @@ test("Context Planner keeps packets bounded and preserves inspectable provenance
     const task = store.contextOs().createTask(PROJECT_ID, {
       title: "Review retry", objective: "Review retry invariants.", phase: "REVIEW",
     });
-    store.record(PROJECT_ID, {
+    const constraint = store.record(PROJECT_ID, {
       type: "CONSTRAINT", summary: "Never duplicate settlement", content: "The idempotency key must be stable.",
       scopeKind: "TASK", scopeRef: task.id, importance: 1_000,
     });
-    store.record(PROJECT_ID, {
+    const decision = store.record(PROJECT_ID, {
       type: "DECISION", summary: "Retry from reconciliation", content: "Only reconciliation observes the final failure.",
       scopeKind: "TASK", scopeRef: task.id, importance: 1_000,
     });
@@ -56,7 +56,27 @@ test("Context Planner keeps packets bounded and preserves inspectable provenance
     assert.ok(packet.items.some((item) => item.category === "CONSTRAINTS" || item.category === "DECISIONS"));
     const explanation = store.contextOs().explainContext(PROJECT_ID, packet.id);
     assert.equal(explanation.packet.id, packet.id);
+    assert.equal(explanation.receipt.status, "BUILT");
+    assert.equal(explanation.receipt.selectedMemoryCount,
+      packet.items.filter((item) => item.sourceType === "MEMORY").length);
     assert.ok(Object.keys(explanation.budgetByCategory).length > 0);
+    for (const memory of [constraint, decision]) {
+      const current = store.get(PROJECT_ID, memory.id);
+      assert.ok((current?.usage.candidateCount ?? 0) > 0);
+      assert.equal(current?.usage.selectedCount,
+        packet.items.some((item) => item.sourceType === "MEMORY" && item.sourceId === memory.id) ? 1 : 0);
+    }
+
+    const delivered = store.contextOs().recordContextDelivery(PROJECT_ID, packet.id, {
+      provider: "codex-app-server", integrationMode: "MANAGED", deliveryPoint: "TEST_TURN_INPUT",
+      status: "DELIVERED", sourceFingerprint: "context-delivery-one",
+    });
+    assert.equal(delivered.status, "DELIVERED");
+    assert.equal(delivered.checkpointId, undefined);
+    assert.equal(store.contextOs().recordContextDelivery(PROJECT_ID, packet.id, {
+      provider: "codex-app-server", integrationMode: "MANAGED", deliveryPoint: "TEST_TURN_INPUT",
+      status: "DELIVERED", sourceFingerprint: "context-delivery-one",
+    }).deliveredAt, delivered.deliveredAt);
   } finally {
     store.close();
   }
@@ -163,6 +183,11 @@ test("lifecycle metrics aggregate bounded counters, retrieval latency, distillat
     store.contextOs().buildContext(PROJECT_ID, {
       taskId: task.id, currentRequest: "Inspect lifecycle telemetry.", provider: "codex-app-server", maxTokens: 600,
     });
+    const packet = store.contextOs().currentContext(PROJECT_ID)!;
+    store.contextOs().recordContextDelivery(PROJECT_ID, packet.id, {
+      provider: "codex-app-server", integrationMode: "MANAGED", deliveryPoint: "TEST_TURN_INPUT",
+      status: "DELIVERED", sourceFingerprint: "lifecycle-delivery-one",
+    });
     store.contextOs().checkpoint(PROJECT_ID, {
       taskId: task.id, status: "VERIFYING", phase: "VERIFICATION",
       summary: "Compaction boundary checkpoint with known telemetry state.",
@@ -182,6 +207,10 @@ test("lifecycle metrics aggregate bounded counters, retrieval latency, distillat
     assert.equal(metrics.observationsPending, 0);
     assert.equal(metrics.observationsProcessed, 1);
     assert.equal(metrics.retrievalRuns, 1);
+    assert.equal(metrics.contextPacketsBuilt, 1);
+    assert.equal(metrics.contextPacketsDelivered, 1);
+    assert.equal(metrics.contextDeliveryFailures, 0);
+    assert.ok(metrics.deliveredEstimatedTokens > 0);
     assert.equal(metrics.contextPacketsInjected, 1);
     assert.ok(metrics.injectedEstimatedTokens > 0);
     assert.equal(metrics.averageHookLatencyMs, 12);

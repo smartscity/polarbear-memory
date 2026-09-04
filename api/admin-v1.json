@@ -1,6 +1,6 @@
 {
   "title": "Polarbear Memory Local Admin API",
-  "version": "1.6",
+  "version": "1.7",
   "engineVersion": "0.1.0",
   "transport": "user-scoped-unix-domain-socket",
   "maxFrameBytes": 1048576,

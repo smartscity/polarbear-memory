@@ -243,6 +243,11 @@ test("UserPromptSubmit retrieves prompt-specific context without persisting the 
       const persisted = JSON.stringify(verified.unprocessedRawEvents(project.id, sessionHash));
       assert.doesNotMatch(persisted, /private-marker-92741/u);
       assert.match(persisted, /promptDigest/u);
+      const packet = verified.contextOs().currentContext(project.id);
+      assert.ok(packet);
+      const receipt = verified.contextOs().contextReceipt(project.id, packet.id);
+      assert.equal(receipt.status, "DELIVERED");
+      assert.equal(receipt.deliveryPoint, "CLAUDE_HOOK_ADDITIONAL_CONTEXT");
     } finally {
       verified.close();
     }

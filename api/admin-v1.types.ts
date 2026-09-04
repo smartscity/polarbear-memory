@@ -93,9 +93,16 @@ export type ContextPacket = {
   provider?: string; maxTokens: number; estimatedTokens: number; retrievalRunId: string; packetHash: string;
   rendered: string; items: ContextPacketItem[]; createdAt: string;
 };
+export type ContextReceipt = {
+  packetId: string; projectId: string; taskId?: string; checkpointId?: string; provider?: string;
+  integrationMode?: "ASSISTED" | "MANAGED"; deliveryPoint?: string; status: "BUILT" | "DELIVERED" | "FAILED";
+  candidateCount: number; selectedCount: number; selectedMemoryCount: number;
+  sourceCounts: Record<"TASK" | "CHECKPOINT" | "MEMORY", number>; estimatedTokens: number; builtAt: string;
+  deliveredAt?: string; failureCode?: string; failureReason?: string;
+};
 export type CurrentContextResponse = { packet: ContextPacket | null };
 export type ContextExplanation = {
-  packet: ContextPacket; budgetByCategory: Record<string, { used: number; limit: number }>;
+  packet: ContextPacket; receipt: ContextReceipt; budgetByCategory: Record<string, { used: number; limit: number }>;
   excluded: Array<{ sourceId: string; category: ContextCategory; reason: string; estimatedTokens: number }>;
 };
 export type TaskRunContext = { run: ExecutionRun; packet?: ContextPacket };
@@ -109,6 +116,8 @@ export type LifecycleMetrics = {
   eventsAccepted: number; eventsSpooled: number; eventsReplayed: number; failOpenOutcomes: number;
   eventsByProvider: Record<string, number>; eventsByType: Record<string, number>;
   observationsPending: number; observationsProcessed: number; retrievalRuns: number;
+  contextPacketsBuilt: number; contextPacketsDelivered: number; contextDeliveryFailures: number;
+  deliveredEstimatedTokens: number;
   contextPacketsInjected: number; injectedEstimatedTokens: number;
   averageRetrievalLatencyMs: number; p95RetrievalLatencyMs: number;
   averageHookLatencyMs: number; maxHookLatencyMs: number;

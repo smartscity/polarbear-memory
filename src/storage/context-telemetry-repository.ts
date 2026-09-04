@@ -146,6 +146,19 @@ export class ContextTelemetryRepository {
       SELECT count(*) AS count, coalesce(sum(estimated_tokens), 0) AS tokens
       FROM context_packets WHERE project_id = ?
     `).get(projectId) as { count: number; tokens: number };
+    const deliveries = this.#database.prepare(`
+      SELECT
+        coalesce(sum(CASE WHEN d.status = 'DELIVERED' THEN 1 ELSE 0 END), 0) AS delivered,
+        coalesce(sum(CASE WHEN d.status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed,
+        coalesce(sum(CASE WHEN d.status = 'DELIVERED' THEN p.estimated_tokens ELSE 0 END), 0) AS delivered_tokens,
+        coalesce(sum(CASE WHEN d.status = 'DELIVERED' AND d.integration_mode = 'MANAGED' THEN 1 ELSE 0 END), 0) AS injected,
+        coalesce(sum(CASE WHEN d.status = 'DELIVERED' AND d.integration_mode = 'MANAGED'
+          THEN p.estimated_tokens ELSE 0 END), 0) AS injected_tokens
+      FROM context_deliveries d JOIN context_packets p ON p.id = d.packet_id
+      WHERE d.project_id = ?
+    `).get(projectId) as {
+      delivered: number; failed: number; delivered_tokens: number; injected: number; injected_tokens: number;
+    };
     const checkpoints = this.#database.prepare(`
       SELECT count(*) AS count,
         coalesce(sum(CASE WHEN summary LIKE 'Compaction checkpoint:%'
@@ -165,8 +178,12 @@ export class ContextTelemetryRepository {
       observationsPending: observations.pending,
       observationsProcessed: observations.total - observations.pending,
       retrievalRuns: retrieval.runs,
-      contextPacketsInjected: packets.count,
-      injectedEstimatedTokens: packets.tokens,
+      contextPacketsBuilt: packets.count,
+      contextPacketsDelivered: deliveries.delivered,
+      contextDeliveryFailures: deliveries.failed,
+      deliveredEstimatedTokens: deliveries.delivered_tokens,
+      contextPacketsInjected: deliveries.injected,
+      injectedEstimatedTokens: deliveries.injected_tokens,
       averageRetrievalLatencyMs: retrieval.average_latency_ms,
       p95RetrievalLatencyMs: p95,
       averageHookLatencyMs: accepted && accepted.count > 0 ? accepted.total_latency_ms / accepted.count : 0,

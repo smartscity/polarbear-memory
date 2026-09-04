@@ -36,13 +36,44 @@ test("fresh database uses canonical V2 tables and a rebuildable derived index", 
     for (const name of [
       "workspaces", "projects", "sessions", "episodes", "evidence", "knowledge_units",
       "knowledge_versions", "knowledge_evidence", "entities", "knowledge_entities",
-      "knowledge_relations", "knowledge_anchors", "lifecycle_assessments", "knowledge_fts",
+      "knowledge_relations", "knowledge_anchors", "lifecycle_assessments", "knowledge_fts", "context_deliveries",
     ]) assert.ok(names.has(name), `missing ${name}`);
     assert.equal(names.has("memories"), false);
     assert.equal((db.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, CURRENT_SCHEMA_VERSION);
     assert.equal((db.prepare("PRAGMA foreign_key_check").all() as unknown[]).length, 0);
   } finally {
     db.close();
+  }
+});
+
+test("schema v9 upgrades add Context delivery receipts without replacing canonical data", () => {
+  const { store, projectId, databasePath } = fixture();
+  const memory = store.record(projectId, { type: "DECISION", summary: "Preserve activation migration data" });
+  store.close();
+
+  const previous = new DatabaseSync(databasePath);
+  previous.exec("DROP TABLE context_deliveries; DELETE FROM schema_migrations WHERE version = 10;");
+  previous.close();
+
+  const migrated = new SqliteMemoryStore(databasePath);
+  try {
+    assert.equal(migrated.get(projectId, memory.id)?.summary, memory.summary);
+    const packet = migrated.contextOs().buildContext(projectId, { currentRequest: "Resume activation migration." });
+    const receipt = migrated.contextOs().recordContextDelivery(projectId, packet.id, {
+      provider: "migration-test", integrationMode: "ASSISTED", deliveryPoint: "TEST",
+      status: "DELIVERED", sourceFingerprint: "migration-delivery",
+    });
+    assert.equal(receipt.status, "DELIVERED");
+  } finally {
+    migrated.close();
+  }
+
+  const verified = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    assert.equal((verified.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 10);
+    assert.equal((verified.prepare("SELECT count(*) AS count FROM context_deliveries").get() as { count: number }).count, 1);
+  } finally {
+    verified.close();
   }
 });
 

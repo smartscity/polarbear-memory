@@ -26,7 +26,7 @@ export { ApiError } from "./admin-errors.js";
 const INTEGRATION_HANDSHAKE_TIMEOUT_MS = 5_000;
 const APP_SERVER_HANDSHAKE_TIMEOUT_MS = 10_000;
 
-export const ADMIN_API_VERSION = "1.6";
+export const ADMIN_API_VERSION = "1.7";
 export const ENGINE_VERSION = VERSION;
 export const ADMIN_CAPABILITIES = [
   "projects.status",

@@ -253,7 +253,8 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
     replaySpool(project, store);
     const accepted = store.ingestRawEvent(envelope);
     const budget = contextBudget(policy);
-    const outcome = new LifecycleOrchestrator(store.contextOs(), project.id).handle({
+    const orchestrator = new LifecycleOrchestrator(store.contextOs(), project.id);
+    const outcome = orchestrator.handle({
       id: envelope.id,
       provider: "claude-code",
       type: NORMALIZED_EVENT_TYPES[parsed.hook_event_name],
@@ -280,6 +281,15 @@ export function ingestClaudeHook(rawInput: unknown, currentWorkingDirectory: str
       store.deleteExpiredRawEvents(project.id, now.toISOString());
     }
     const additionalContext = outcome.contextPacket?.rendered;
+    if (additionalContext && outcome.contextPacket) {
+      orchestrator.recordContextDelivery(outcome.contextPacket.id, {
+        provider: "claude-code",
+        integrationMode: "MANAGED",
+        deliveryPoint: "CLAUDE_HOOK_ADDITIONAL_CONTEXT",
+        status: "DELIVERED",
+        sourceFingerprint: `claude-hook:${envelope.id}:${outcome.contextPacket.id}`,
+      });
+    }
     return {
       accepted,
       spooled: false,

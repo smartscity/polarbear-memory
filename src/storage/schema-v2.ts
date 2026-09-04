@@ -1,6 +1,6 @@
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 export const V2_MIGRATION_CHECKSUM = "v2-fact-episode-entity-2026-08-28";
-export const CONTEXT_OS_MIGRATION_CHECKSUM = "v9-lifecycle-telemetry-2026-09-02";
+export const CONTEXT_OS_MIGRATION_CHECKSUM = "v10-context-activation-2026-09-05";
 
 export const V2_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -469,6 +469,24 @@ CREATE TABLE IF NOT EXISTS context_packet_items (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS context_packet_items_source ON context_packet_items(source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS context_deliveries (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  packet_id TEXT NOT NULL REFERENCES context_packets(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  integration_mode TEXT NOT NULL CHECK (integration_mode IN ('ASSISTED','MANAGED')),
+  delivery_point TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('DELIVERED','FAILED')),
+  failure_code TEXT,
+  failure_reason TEXT,
+  source_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, source_fingerprint)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS context_deliveries_packet ON context_deliveries(packet_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS context_deliveries_project ON context_deliveries(project_id, status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS usage_ledger (
   id TEXT PRIMARY KEY,
