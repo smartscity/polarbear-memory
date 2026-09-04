@@ -4,7 +4,7 @@
 
 建议按以下顺序阅读：
 
-1. [产品与路线图](./planning/product-and-roadmap.md)
+1. [产品与路线图](./planning/product-and-roadmap.md)与评审草案 [Memory 激活进化方案](./planning/memory-activation-proposal.md)
 2. [总体架构](./architecture/overview.md)
 3. [Memory Engine](./architecture/memory-engine.md) 与 [Agent Context OS](./architecture/context-os.md)
 4. [MCP 协议](./protocols/mcp.md) 与 [Admin API](./protocols/admin-api.md)
@@ -18,7 +18,7 @@
 |---|---|
 | 普通用户 | [快速开始](./guides/getting-started.md) |
 | Agent 用户 | [Context OS 工作流](./guides/context-os.md) |
-| 产品评审 | [产品与路线图](./planning/product-and-roadmap.md) |
+| 产品评审 | [产品与路线图](./planning/product-and-roadmap.md)与 [Memory 激活进化方案](./planning/memory-activation-proposal.md) |
 | 架构师 | [总体架构](./architecture/overview.md) |
 | Desktop/API 集成者 | [Admin API](./protocols/admin-api.md) |
 | MCP 客户端开发者 | [MCP 协议](./protocols/mcp.md) |

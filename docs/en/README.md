@@ -4,7 +4,7 @@
 
 Read the documentation in this order when learning the project:
 
-1. [Product and roadmap](./planning/product-and-roadmap.md)
+1. [Product and roadmap](./planning/product-and-roadmap.md) and the draft [Memory activation evolution proposal](./planning/memory-activation-proposal.md)
 2. [Architecture overview](./architecture/overview.md)
 3. [Memory Engine](./architecture/memory-engine.md) and [Agent Context OS](./architecture/context-os.md)
 4. [MCP](./protocols/mcp.md) and [Admin API](./protocols/admin-api.md)
@@ -18,7 +18,7 @@ Read the documentation in this order when learning the project:
 |---|---|
 | User | [Getting started](./guides/getting-started.md) |
 | Agent user | [Context OS workflow](./guides/context-os.md) |
-| Product reviewer | [Product and roadmap](./planning/product-and-roadmap.md) |
+| Product reviewer | [Product and roadmap](./planning/product-and-roadmap.md) and [Memory activation evolution proposal](./planning/memory-activation-proposal.md) |
 | Architect | [Architecture overview](./architecture/overview.md) |
 | Desktop/API integrator | [Admin API](./protocols/admin-api.md) |
 | MCP client author | [MCP protocol](./protocols/mcp.md) |
