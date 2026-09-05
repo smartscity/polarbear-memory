@@ -30,6 +30,7 @@ export class CaptureService {
   }
 
   upsertSession(projectId: string, input: SessionInput): Session {
+    if (input.id) this.#assertOwnedId("sessions", projectId, input.id, "Session");
     const now = new Date().toISOString();
     const existing = input.externalSessionRefHash
       ? this.#database.prepare(`
@@ -64,6 +65,8 @@ export class CaptureService {
 
   recordEpisode(projectId: string, input: EpisodeInput): Episode {
     if (!input.summary.trim()) throw new Error("Episode summary must not be empty.");
+    if (input.id) this.#assertOwnedId("episodes", projectId, input.id, "Episode");
+    if (input.sessionId) this.#requireOwnedId("sessions", projectId, input.sessionId, "Session");
     const now = new Date().toISOString();
     const existing = this.#database.prepare(`
       SELECT id FROM episodes WHERE project_id = ? AND source_digest = ? AND episode_type = ?
@@ -80,6 +83,8 @@ export class CaptureService {
   }
 
   recordEvidence(projectId: string, input: EvidenceInput): Evidence {
+    if (input.id) this.#assertOwnedId("evidence", projectId, input.id, "Evidence");
+    if (input.episodeId) this.#requireOwnedId("episodes", projectId, input.episodeId, "Episode");
     const now = new Date().toISOString();
     const existing = this.#database.prepare(`
       SELECT id FROM evidence WHERE project_id = ? AND digest = ? AND evidence_type = ? AND source_ref IS ?
@@ -143,6 +148,28 @@ export class CaptureService {
     `).run(memoryId, entityId, role, confidence, new Date().toISOString());
     this.#searchIndex.refresh(memoryId);
     return this.#requireMemory(projectId, memoryId);
+  }
+
+  #assertOwnedId(
+    table: "sessions" | "episodes" | "evidence",
+    projectId: string,
+    id: string,
+    label: string,
+  ): void {
+    const row = this.#database.prepare(`SELECT project_id FROM ${table} WHERE id = ?`)
+      .get(id) as { project_id: string } | undefined;
+    if (row && row.project_id !== projectId) throw new Error(`${label} belongs to another project: ${id}`);
+  }
+
+  #requireOwnedId(
+    table: "sessions" | "episodes",
+    projectId: string,
+    id: string,
+    label: string,
+  ): void {
+    const row = this.#database.prepare(`SELECT project_id FROM ${table} WHERE id = ?`)
+      .get(id) as { project_id: string } | undefined;
+    if (!row || row.project_id !== projectId) throw new Error(`${label} not found in this project: ${id}`);
   }
 
   #requireMemory(projectId: string, memoryId: string): Memory {

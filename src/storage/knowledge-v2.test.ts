@@ -166,6 +166,53 @@ test("evidence and engineering entities are many-to-many and entity-aware retrie
   }
 });
 
+test("normalized capture rejects cross-project identifiers and parent links", () => {
+  const { store, projectId, databasePath } = fixture();
+  const otherProjectId = "88888888-8888-4888-8888-888888888888";
+  store.initializeProject({ id: otherProjectId, name: "other-project" });
+  try {
+    const session = store.upsertSession(projectId, {
+      id: "shared-session", agentKind: "CODEX", branchName: "main",
+    });
+    assert.throws(() => store.upsertSession(otherProjectId, {
+      id: session.id, agentKind: "CODEX", branchName: "tampered",
+    }), /belongs to another project/);
+    assert.throws(() => store.recordEpisode(otherProjectId, {
+      sessionId: session.id, type: "TOOL_RESULT", sourceDigest: "cross-project-episode",
+      summary: "Must not cross the project boundary",
+    }), /not found in this project/);
+
+    const episode = store.recordEpisode(projectId, {
+      sessionId: session.id, type: "TOOL_RESULT", sourceDigest: "owned-episode",
+      summary: "Project-owned episode",
+    });
+    assert.throws(() => store.recordEpisode(otherProjectId, {
+      id: episode.id, type: "TOOL_RESULT", sourceDigest: "colliding-episode",
+      summary: "Must not reuse another project's Episode ID",
+    }), /belongs to another project/);
+    assert.throws(() => store.recordEvidence(otherProjectId, {
+      episodeId: episode.id, type: "TEST", digest: "cross-project-evidence",
+    }), /not found in this project/);
+    const evidence = store.recordEvidence(projectId, {
+      id: "shared-evidence", episodeId: episode.id, type: "TEST", digest: "owned-evidence",
+    });
+    assert.throws(() => store.recordEvidence(otherProjectId, {
+      id: evidence.id, type: "TEST", digest: "colliding-evidence",
+    }), /belongs to another project/);
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((database.prepare("SELECT branch_name FROM sessions WHERE id = ?").get(session.id) as { branch_name: string }).branch_name, "main");
+      assert.equal((database.prepare("SELECT count(*) AS count FROM episodes WHERE project_id = ?").get(otherProjectId) as { count: number }).count, 0);
+      assert.equal((database.prepare("SELECT count(*) AS count FROM evidence WHERE project_id = ?").get(otherProjectId) as { count: number }).count, 0);
+    } finally {
+      database.close();
+    }
+  } finally {
+    store.close();
+  }
+});
+
 test("relation integrity supports bounded V2 relation types and rejects cycles", () => {
   const { store, projectId } = fixture();
   try {
